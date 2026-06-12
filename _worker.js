@@ -5,7 +5,7 @@ import { connect } from "cloudflare:sockets";
  * Handles real-time binary streams from remote sensor nodes.
  */
 
-const CURRENT_VERSION = "2.4.8";
+const CURRENT_VERSION = "2.4.9";
 
 const getAlpha = () => String.fromCharCode(118, 108, 101, 115, 115);
 const getBeta = () => String.fromCharCode(116, 114, 111, 106, 97, 110);
@@ -1639,7 +1639,7 @@ function getAllProfiles(targetSub = null) {
                 if (usr.lastDay === new Date().toISOString().split('T')[0] && usr.dReqs >= u.limitDailyReq) skip = true;
             }
             if(!skip) {
-                list.push({ id: u.id, name: u.name, proxyIp: u.proxyIp });
+                list.push({ id: u.id, name: u.name, proxyIp: u.proxyIp, userMode: u.userMode || null, userPorts: u.userPorts || null, maxConfigs: u.maxConfigs || null });
             }
         });
     }
@@ -1684,6 +1684,15 @@ function getConfigName(type, profileName, port, hostName, ip) {
     }
 }
 
+function calcEffectiveIps(ips, maxCfg, effectiveMode, effectivePorts) {
+    if (!maxCfg) return ips;
+    let protoCount = effectiveMode === "both" ? 2 : 1;
+    let portCount = effectivePorts.length;
+    let multiplier = protoCount * portCount;
+    let neededIps = Math.max(1, Math.floor(maxCfg / multiplier));
+    return ips.slice(0, neededIps);
+}
+
 function buildUriProfile(hostName, targetSub = null, allowInsecure = false) {
     let allHostNames = [hostName];
     if (sysConfig.slaveNodes) allHostNames.push(...sysConfig.slaveNodes.split(/[\r\n,;]+/).map(s=>s.trim()).filter(Boolean));
@@ -1701,9 +1710,14 @@ function buildUriProfile(hostName, targetSub = null, allowInsecure = false) {
     lines.push(fakeU1, fakeU2);
     
     profiles.forEach(p => {
+        let effectiveMode = p.userMode || sysConfig.mode;
+        let effectivePorts = p.userPorts ? p.userPorts.split(',').map(s=>s.trim()).filter(Boolean) : ports;
+        let maxCfg = p.maxConfigs || null;
+
         allHostNames.forEach(hName => {
-            let ips = getCleanIps(hName, p.proxyIp);
-            ports.forEach(port => {
+            let allIps = getCleanIps(hName, p.proxyIp);
+            let ips = calcEffectiveIps(allIps, maxCfg, effectiveMode, effectivePorts);
+            effectivePorts.forEach(port => {
                 let sec = getTransportParams(port);
                 let extBase = `encryption=none&security=${sec}&sni=${hName}&fp=${sysConfig.agent}&type=ws&host=${hName}&path=${reqPath}`;
                 if (sysConfig.enableOpt2) extBase += `&pbk=enabled`;
@@ -1711,11 +1725,10 @@ function buildUriProfile(hostName, targetSub = null, allowInsecure = false) {
                 ips.forEach(ip => {
                     let vName = getConfigName("alpha", p.name, port, hName, ip);
                     let tName = getConfigName("beta", p.name, port, hName, ip);
-                    
-                    if (sysConfig.mode === "alpha" || sysConfig.mode === "both") {
+                    if (effectiveMode === "alpha" || effectiveMode === "both") {
                         lines.push(`${getAlpha()}://${p.id}@${ip}:${port}?${extBase}#${vName}`);
                     }
-                    if (sysConfig.mode === "beta" || sysConfig.mode === "both") {
+                    if (effectiveMode === "beta" || effectiveMode === "both") {
                         lines.push(`${getBeta()}://${p.id}@${ip}:${port}?${extBase}#${tName}`);
                     }
                 });
@@ -1759,32 +1772,32 @@ function buildYamlProfile(hostName, targetSub = null, allowInsecure = false) {
     };
 
     profiles.forEach(p => {
+        let effectiveMode = p.userMode || sysConfig.mode;
+        let effectivePorts = p.userPorts ? p.userPorts.split(',').map(s=>s.trim()).filter(Boolean) : ports;
+        let maxCfg = p.maxConfigs || null;
+
         allHostNames.forEach(hName => {
-            let ips = getCleanIps(hName, p.proxyIp);
-            ports.forEach(port => {
+            let allIps = getCleanIps(hName, p.proxyIp);
+            let ips = calcEffectiveIps(allIps, maxCfg, effectiveMode, effectivePorts);
+            effectivePorts.forEach(port => {
                 let sec = getTransportParams(port) === "tls" ? "true" : "false";
                 ips.forEach(ip => {
-                    if (sysConfig.mode === "alpha" || sysConfig.mode === "both") {
+                    if (effectiveMode === "alpha" || effectiveMode === "both") {
                         let vName = getConfigName("alpha", p.name, port, hName, ip);
                         vName = getUniqueName(vName);
                         proxyNames.push(`"${vName}"`);
-                        
                         let randomJunk = Array.from({length: 11}, () => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[Math.floor(Math.random() * 62)]).join('');
                         let payloadVl = { junk: randomJunk, protocol: "vl", mode: "proxyip", panelIPs: [] };
                         let pathStrVl = "/" + btoa(JSON.stringify(payloadVl));
-
                         proxies.push(`- name: "${vName}"\n  type: ${getAlpha()}\n  server: ${ip}\n  port: ${port}\n  uuid: ${p.id}\n  udp: true\n  tls: ${sec}\n  servername: ${hName}\n  client-fingerprint: ${sysConfig.agent || "random"}\n  network: ws\n  ws-opts:\n    path: "${pathStrVl}"\n    headers:\n      Host: ${hName}\n  skip-cert-verify: ${allowInsecure}\n${sysConfig.enableOpt1 ? "  tfo: true" : ""}`);
                     }
-
-                    if (sysConfig.mode === "beta" || sysConfig.mode === "both") {
+                    if (effectiveMode === "beta" || effectiveMode === "both") {
                         let tName = getConfigName("beta", p.name, port, hName, ip);
                         tName = getUniqueName(tName);
                         proxyNames.push(`"${tName}"`);
-                        
                         let randomJunk = Array.from({length: 11}, () => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[Math.floor(Math.random() * 62)]).join('');
                         let payloadTr = { junk: randomJunk, protocol: "tr", mode: "proxyip", panelIPs: [] };
                         let pathStrTr = "/" + btoa(JSON.stringify(payloadTr));
-
                         proxies.push(`- name: "${tName}"\n  type: ${getBeta()}\n  server: ${ip}\n  port: ${port}\n  password: ${p.id}\n  udp: true\n  tls: ${sec}\n  sni: ${hName}\n  client-fingerprint: ${sysConfig.agent || "random"}\n  network: ws\n  ws-opts:\n    path: "${pathStrTr}"\n    headers:\n      Host: ${hName}\n  skip-cert-verify: ${allowInsecure}\n${sysConfig.enableOpt1 ? "  tfo: true" : ""}`);
                     }
                 });
@@ -1950,13 +1963,18 @@ function buildClashJsonProfile(hostName, targetSub = null, allowInsecure = false
     };
 
     profiles.forEach(p => {
+        let effectiveMode = p.userMode || sysConfig.mode;
+        let effectivePorts = p.userPorts ? p.userPorts.split(',').map(s=>s.trim()).filter(Boolean) : ports;
+        let maxCfg = p.maxConfigs || null;
+
         allHostNames.forEach(hName => {
-            let ips = getCleanIps(hName, p.proxyIp);
-            ports.forEach(port => {
+            let allIps = getCleanIps(hName, p.proxyIp);
+            let ips = calcEffectiveIps(allIps, maxCfg, effectiveMode, effectivePorts);
+            effectivePorts.forEach(port => {
                 let sec = getTransportParams(port) === "tls";
                 ips.forEach(ip => {
-                    let isVless = sysConfig.mode === "alpha" || sysConfig.mode === "both";
-                    let isTrojan = sysConfig.mode === "beta" || sysConfig.mode === "both";
+                    let isVless = effectiveMode === "alpha" || effectiveMode === "both";
+                    let isTrojan = effectiveMode === "beta" || effectiveMode === "both";
 
                     if (isVless) {
                         let tagStr = getConfigName("alpha", p.name, port, hName, ip);
@@ -2223,13 +2241,18 @@ function buildSingBoxJsonProfile(hostName, targetSub = null, allowInsecure = fal
     };
 
     profiles.forEach(p => {
+        let effectiveMode = p.userMode || sysConfig.mode;
+        let effectivePorts = p.userPorts ? p.userPorts.split(',').map(s=>s.trim()).filter(Boolean) : ports;
+        let maxCfg = p.maxConfigs || null;
+
         allHostNames.forEach(hName => {
-            let ips = getCleanIps(hName, p.proxyIp);
-            ports.forEach(port => {
+            let allIps = getCleanIps(hName, p.proxyIp);
+            let ips = calcEffectiveIps(allIps, maxCfg, effectiveMode, effectivePorts);
+            effectivePorts.forEach(port => {
                 let sec = getTransportParams(port) === "tls";
                 ips.forEach(ip => {
-                    let isVless = sysConfig.mode === "alpha" || sysConfig.mode === "both";
-                    let isTrojan = sysConfig.mode === "beta" || sysConfig.mode === "both";
+                    let isVless = effectiveMode === "alpha" || effectiveMode === "both";
+                    let isTrojan = effectiveMode === "beta" || effectiveMode === "both";
 
                     if (isVless) {
                         let tagStr = getConfigName("alpha", p.name, port, hName, ip);
@@ -2773,7 +2796,7 @@ function getDashboardUI(hasDB) {
                       </div>
                       ${!hasDB ? `<div class="mb-5 p-4 rounded-2xl flex items-start gap-3" style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);"><span style="color:#f87171;">&#9888;&#65039;</span><span class="text-sm" style="color:#fca5a5;" data-i18n="missing_db">Database not connected. Settings won't be saved.</span></div>` : ''}
                       <div class="mb-5">
-                          <label class="block text-sm font-semibold mb-2.5" style="color:#94a3b8;">Password</label>
+                          <label class="block text-sm font-semibold mb-2.5" style="color:#94a3b8;" data-i18n="login_password">Password</label>
                           <div class="relative">
                               <div class="absolute inset-y-0 start-0 flex items-center ps-4" style="color:rgba(99,102,241,0.7);">
                                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
@@ -3321,6 +3344,23 @@ function getDashboardUI(hasDB) {
                                       <label class="block text-xs font-bold text-slate-500 mb-1">User Proxy IP(s) (Optional - overrides global Clean IP, comma/newline separated)</label>
                                       <input type="text" id="add-user-proxy-ip" placeholder="e.g. 104.20.0.1, proxyip.com" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
                                   </div>
+                                  <div>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_Protocol">Protocol Mode (Leave empty to use global setting)</label>
+                                      <select id="add-user-mode" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm appearance-none">
+                                          <option value="">— Use Global Setting —</option>
+                                          <option value="alpha">Alpha Only (V-Core / VLESS)</option>
+                                          <option value="beta">Beta Only (T-Core / Trojan)</option>
+                                          <option value="both">Both (VLESS + Trojan)</option>
+                                      </select>
+                                  </div>
+                                  <div>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ports">Custom Ports (Optional - overrides global ports, comma separated e.g. 443,80)</label>
+                                      <input type="text" id="add-user-ports" placeholder="e.g. 443,80,2053" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
+                                  </div>
+                                  <div>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_max_config">Max Configs (Optional - limit total generated configs, e.g. 4)</label>
+                                      <input type="number" id="add-user-max-configs" placeholder="Leave empty for unlimited" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
+                                  </div>
                                   <div class="flex justify-end gap-2 mt-6">
                                       <button onclick="document.getElementById('modal-add-user').classList.add('hidden')" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold" data-i18n="btn_cancel">Cancel</button>
                                       <button onclick="commitAddUser()" class="px-4 py-2 rounded-xl bg-primary text-white font-bold" data-i18n="save_btn_user">Save User</button>
@@ -3354,6 +3394,23 @@ function getDashboardUI(hasDB) {
                                   <div>
                                       <label class="block text-xs font-bold text-slate-500 mb-1">User Proxy IP(s) (Optional - overrides global Clean IP, comma/newline separated)</label>
                                       <input type="text" id="edit-user-proxy-ip" placeholder="e.g. 104.20.0.1, proxyip.com" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
+                                  </div>
+                                  <div>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_Protocol">Protocol Mode (Leave empty to use global setting)</label>
+                                      <select id="edit-user-mode" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm appearance-none">
+                                          <option value="">— Use Global Setting —</option>
+                                          <option value="alpha">Alpha Only (V-Core / VLESS)</option>
+                                          <option value="beta">Beta Only (T-Core / Trojan)</option>
+                                          <option value="both">Both (VLESS + Trojan)</option>
+                                      </select>
+                                  </div>
+                                  <div>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ports">Custom Ports (Optional - overrides global ports, comma separated e.g. 443,80)</label>
+                                      <input type="text" id="edit-user-ports" placeholder="e.g. 443,80,2053" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
+                                  </div>
+                                  <div>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_max_config">Max Configs (Optional - limit total generated configs, e.g. 4)</label>
+                                      <input type="number" id="edit-user-max-configs" placeholder="Leave empty for unlimited" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
                                   </div>
                                   <div class="flex justify-end gap-2 mt-6">
                                       <button onclick="document.getElementById('modal-edit-user').classList.add('hidden')" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold" data-i18n="btn_cancel">Cancel</button>
@@ -3451,7 +3508,7 @@ function getDashboardUI(hasDB) {
                       </div>
                       <div>
                           <h3 class="text-lg font-black text-slate-800 dark:text-white" data-i18n="v_pop_title">Version Update</h3>
-                          <span class="text-[10px] font-bold px-2 py-0.5 bg-indigo-500 text-white rounded-full tracking-wide">v2.4.8</span>
+                          <span class="text-[10px] font-bold px-2 py-0.5 bg-indigo-500 text-white rounded-full tracking-wide">v2.4.9</span>
                       </div>
                   </div>
                   <button onclick="closeVersionModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white bg-slate-50 dark:bg-slate-800 p-2 rounded-xl border border-slate-100 dark:border-darkborder transition-colors">
@@ -3471,33 +3528,10 @@ function getDashboardUI(hasDB) {
                       <div class="flex gap-3">
                           <div class="text-primary mt-1">✨</div>
                           <div>
-                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b1_title">Fixed NTP configuration schema validation</strong>
+                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b1_title">Add Custom Protocol-Port And Max Config For Users </strong>
                           </div>
-                      </div>
-                      <div class="flex gap-3">
-                          <div class="text-primary mt-1">✨</div>
-                          <div>
-                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b2_title">Removed deprecated resolver fields</strong>
-                          </div>
-                      </div>
-                      <div class="flex gap-3">
-                          <div class="text-primary mt-1">✨</div>
-                          <div>
-                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b3_title">Improved route rules and HTTPS handling</strong>
-                          </div>
-                      </div>
-                      <div class="flex gap-3">
-                          <div class="text-primary mt-1">✨</div>
-                          <div>
-                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b4_title">Added automatic changelog fetching for repository updates</strong>
-                          </div>
-                      </div>
-                      <div class="flex gap-3">
-                          <div class="text-primary mt-1">✨</div>
-                          <div>
-                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b5_title">Obsolete and duplicate route definition cleanup</strong>
-                          </div>
-                      </div>
+                      
+                    </div>
                   </div>
               </div>
 
@@ -3508,7 +3542,7 @@ function getDashboardUI(hasDB) {
       </div>
   
       <script>
-          const CURRENT_VERSION = "2.4.8";
+          const CURRENT_VERSION = "2.4.9";
           const i18n = {
               en: {
                   title: "Nahan Gateway", pass_ph: "Master Key", login_btn: "Authenticate", err_pass: "Access Denied", missing_db: "⚠️ IOT_DB namespace missing! Settings won't save.",
@@ -3531,12 +3565,16 @@ function getDashboardUI(hasDB) {
                   btn_save_changes: "Save Changes", save_btn_user: "Save User", status_active: "Active", status_paused: "Paused", status_expired: "Expired",
                   stat_total_subscribers: "Total Subscribers", stat_active_paused: "Active / Paused", stat_cumulative_traffic: "Cumulative Traffic",
                   sub_directory_title: "Subscriber Directory", sub_directory_desc: "Search, modify bounds, toggle traffic limits or clear billing sessions.", user_search_placeholder: "🔍 Find by Name or UUID...",
+                  lbl_u_Protocol:"Protocol Mode (Leave empty to use global setting)",
+                  lbl_u_ports:"Custom Ports (Optional - overrides global ports, comma separated e.g. 443,80",
+                  lbl_u_max_config:"Max Configs",
+                  login_password:"Password",
                   v_pop_title: "Release Notice", v_pop_whatsnew: "What's New", v_pop_headline: "New Features & Improvements",
-                  v_pop_b1_title: "ALL-in-ONE URL and removed alph, beta, gamma",
-                  v_pop_b2_title: "Add ability to set separate proxy-ip for each user",
-                  v_pop_b3_title: "Fix clash and singbox subscription",
-                  v_pop_b4_title: "Add used gb and remaining date to subscription",
-                  v_pop_b5_title: "General bug fixes and system improvements",
+                  v_pop_b1_title: "Add Custom Protocol-Port And Max Config For Users",
+                  v_pop_b2_title: "",
+                  v_pop_b3_title: "",
+                  v_pop_b4_title: "",
+                  v_pop_b5_title: "",
                   v_pop_b6_title: "",
                   v_pop_b7_title: "",
                   v_pop_btn: "Got it!",
@@ -3571,15 +3609,20 @@ function getDashboardUI(hasDB) {
                   export_btn: "📥 برون‌بری فایل پیکربندی (نسخه پشتیبان)", import_btn: "📤 درون‌ریزی فایل پیکربندی (نسخه پشتیبان)",
                   stat_total_subscribers: "کل مشترکین", stat_active_paused: "فعال / متوقف شده", stat_cumulative_traffic: "ترافیک کل انباشته",
                   sub_directory_title: "فهرست مشترکین", sub_directory_desc: "جستجو، اصلاح محدودیت‌ها، تغییر محدودیت‌های ترافیک یا پاک کردن جلسات حسابداری.", user_search_placeholder: "🔍 جستجو بر اساس نام یا شناسه...",
+                  lbl_u_Protocol:"نوع پروتکل(خالی بر اساس تنظیمات کلی)",
+                  lbl_u_ports:"نوع پورت",
+                  lbl_u_max_config:"حداکثر تعداد کانفیگ",
+                  login_password:"رمز ورود",
                   v_pop_title: "اطلاعیه تعمیرات", v_pop_whatsnew: "ویژگی‌های جدید", v_pop_headline: "امکانات جدید و بهبودها",
-                  v_pop_b1_title: "تک آدرس شدن (ALL-in-ONE URL) و حذف آلفا، بتا، گاما",
-                  v_pop_b2_title: "امکان تنظیم آی‌پی پروکسی (proxy-ip) مجزا برای هر کاربر",
-                  v_pop_b3_title: "رفع مشکل لینک اشتراک کلش و سینگ‌باکس",
-                  v_pop_b4_title: "اضافه شدن نمایش حجم مصرفی و تاریخ انقضا در توضیحات اشتراک",
-                  v_pop_b5_title: "رفع باگ‌های جزئی و بهبود عملکرد سیستم",
+                  v_pop_b1_title: "اضافه شدن تنظیمات جدا برای هرکاربر(تعداد گانفیگ،پروتکل وپورت)",
+                  v_pop_b2_title: "",
+                  v_pop_b3_title: "",
+                  v_pop_b4_title: "",
+                  v_pop_b5_title: "",
                   v_pop_b6_title: "",
                   v_pop_b7_title: "",
                   v_pop_btn: "متوجه شدم!",
+                 
                   changelog_title: "گزارش تغییرات و توضیحات نسخه جدید:"
               }
           };
@@ -3958,7 +4001,7 @@ function getDashboardUI(hasDB) {
                                   \${isDef ? '<span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded font-bold uppercase">Master</span>' : ''}
                               </div>
                               <div class="space-y-3">
-                                  <div>
+                                  <div> 
                                       <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">UUID</label>
                                       <div class="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-darkborder px-3 py-2 rounded-lg text-xs font-mono text-slate-500">\${p.id}</div>
                                   </div>
@@ -4175,7 +4218,13 @@ function getDashboardUI(hasDB) {
                   }
 
                   tr.innerHTML = \`
-                      <td class="px-4 py-4 font-bold text-slate-700 dark:text-slate-300">\${u.name} \${u.isPaused ? '⏸️' : (isExp ? '🔴' : '🟢')}</td>
+                      <td class="px-4 py-4 font-bold text-slate-700 dark:text-slate-300">\${u.name} \${u.isPaused ? '⏸️' : (isExp ? '🔴' : '🟢')}
+                          <div class="flex flex-wrap gap-1 mt-1">
+                              \${u.userMode ? \`<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-300">\${u.userMode === 'alpha' ? 'VLESS' : u.userMode === 'beta' ? 'Trojan' : 'VLESS+Trojan'}</span>\` : ''}
+                              \${u.userPorts ? \`<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-300">🔌 \${u.userPorts}</span>\` : ''}
+                              \${u.maxConfigs ? \`<span class="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-300">max \${u.maxConfigs} cfgs</span>\` : ''}
+                          </div>
+                      </td>
                       <td class="px-4 py-4 font-mono text-xs text-slate-500 select-all">\${u.id}</td>
                       <td class="px-4 py-4 text-slate-600 dark:text-slate-400 font-mono">
                           <div class="flex flex-col gap-1.5">
@@ -4264,6 +4313,10 @@ function getDashboardUI(hasDB) {
               dReq = dReq? Math.floor(parseFloat(dReq) * 6000): null;
               let days = document.getElementById('add-user-days').value;
               const proxyIp = document.getElementById('add-user-proxy-ip').value || null;
+              const userMode = document.getElementById('add-user-mode').value || null;
+              const userPorts = document.getElementById('add-user-ports').value.trim() || null;
+              let maxConfigs = document.getElementById('add-user-max-configs').value;
+              maxConfigs = maxConfigs ? parseInt(maxConfigs) : null;
               
               if(!name) {
                   const enterNameMsg = lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name';
@@ -4287,6 +4340,9 @@ function getDashboardUI(hasDB) {
                    limitDailyReq: dReq,
                    expiryMs: days ? Date.now() + days*86400000 : null,
                    proxyIp: proxyIp,
+                   userMode: userMode,
+                   userPorts: userPorts,
+                   maxConfigs: maxConfigs,
                    createdAt: Date.now()
                };
               
@@ -4297,6 +4353,9 @@ function getDashboardUI(hasDB) {
               document.getElementById('add-user-daily-reqs').value = '';
               document.getElementById('add-user-days').value = '';
               document.getElementById('add-user-proxy-ip').value = '';
+              document.getElementById('add-user-mode').value = '';
+              document.getElementById('add-user-ports').value = '';
+              document.getElementById('add-user-max-configs').value = '';
               
               renderUsersTable();
               doSaveDirectly();
@@ -4312,6 +4371,9 @@ function getDashboardUI(hasDB) {
               document.getElementById('edit-user-total-reqs').value = u.limitTotalReq? (u.limitTotalReq / 6000).toFixed(2): '';
               document.getElementById('edit-user-daily-reqs').value = u.limitDailyReq? (u.limitDailyReq / 6000).toFixed(2): '';
               document.getElementById('edit-user-proxy-ip').value = u.proxyIp || '';
+              document.getElementById('edit-user-mode').value = u.userMode || '';
+              document.getElementById('edit-user-ports').value = u.userPorts || '';
+              document.getElementById('edit-user-max-configs').value = u.maxConfigs || '';
               
               let daysLeft = '';
               if(u.expiryMs) {
@@ -4332,6 +4394,10 @@ function getDashboardUI(hasDB) {
               dReq = dReq? Math.floor(parseFloat(dReq) * 6000): null;
               let days = document.getElementById('edit-user-days').value;
               const proxyIp = document.getElementById('edit-user-proxy-ip').value || null;
+              const userMode = document.getElementById('edit-user-mode').value || null;
+              const userPorts = document.getElementById('edit-user-ports').value.trim() || null;
+              let maxConfigs = document.getElementById('edit-user-max-configs').value;
+              maxConfigs = maxConfigs ? parseInt(maxConfigs) : null;
               
               if(!name) {
                   const enterNameMsg = lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name';
@@ -4351,6 +4417,9 @@ function getDashboardUI(hasDB) {
               u.limitDailyReq = dReq;
               u.expiryMs = days ? Date.now() + days*86400000 : null;
               u.proxyIp = proxyIp;
+              u.userMode = userMode;
+              u.userPorts = userPorts;
+              u.maxConfigs = maxConfigs;
               
               document.getElementById('modal-edit-user').classList.add('hidden');
               renderUsersTable();
