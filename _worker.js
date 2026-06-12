@@ -5,11 +5,24 @@ import { connect } from "cloudflare:sockets";
  * Handles real-time binary streams from remote sensor nodes.
  */
 
-const CURRENT_VERSION = "2.4.7";
+const CURRENT_VERSION = "2.4.8";
 
 const getAlpha = () => String.fromCharCode(118, 108, 101, 115, 115);
 const getBeta = () => String.fromCharCode(116, 114, 111, 106, 97, 110);
 const getGamma = () => String.fromCharCode(99, 108, 97, 115, 104);
+
+const safeBtoa = (str) => {
+    try {
+        const bytes = new TextEncoder().encode(str);
+        let binary = "";
+        for (let i = 0; i < bytes.byteLength; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    } catch (e) {
+        return btoa(str);
+    }
+};
 
 const SYSTEM_DEFAULTS = {
     apiRoute: "sync",
@@ -42,6 +55,8 @@ const SYSTEM_DEFAULTS = {
     users: [],
     subUserAgent: "",
     customPanelUrl: "",
+    limitTotalReq: 0,
+    expiryMs: 0,
 };
 
 let sysConfig = { ...SYSTEM_DEFAULTS };
@@ -240,9 +255,7 @@ export default {
                         ua.includes("edge")
                     ) && !ua.includes("cla" + "sh") && !ua.includes("si" + "ng-box") && !ua.includes("v" + "2r" + "ay") && !ua.includes("shadow" + "rocket") && !ua.includes("quantum" + "ult") && !ua.includes("surf" + "board") && !ua.includes("sta" + "sh");
 
-                    const isRawFlag = url.searchParams.get("flag") === 'raw' || url.searchParams.get("flag") === 'a' || url.searchParams.get("raw") === 'true';
-                    
-                    if (isRealBrowser && !isRawFlag && !isCustomUaAllowed) {
+                    if (isRealBrowser && !isCustomUaAllowed) {
                         if (isValidUser) {
                             return serveSubscriptionInfoPage(targetUser, clientHost, url, request);
                         } else {
@@ -254,22 +267,87 @@ export default {
                         return new Response("Error: Default profile sync is disabled when multi-user is active.", { status: 403 });
                     }
                     
+                    const allowInsecure = url.searchParams.get("insecure") === "true" || 
+                                         url.searchParams.get("allowInsecure") === "true" ||
+                                         url.searchParams.get("allow_insecure") === "1" ||
+                                         url.searchParams.get("allowInsecure") === "1";
+
+                    const resHeaders = new Headers();
+                    resHeaders.set("Cache-Control", "no-store");
+                    resHeaders.set("Access-Control-Allow-Origin", "*");
+                    
                     let flag = (url.searchParams.get("flag") || url.searchParams.get("format") || url.searchParams.get("type") || url.searchParams.get("output") || "").toLowerCase();
-                    if (flag === "b" || flag.includes("cla" + "sh") || flag === "c_legacy") {
-                        return new Response(JSON.stringify(buildClashJsonProfile(clientHost, targetSub), null, 2), {
-                            headers: { "Content-Type": "application/json; charset=utf-8" }
-                        });
-                    } else if (flag === "c" || flag === "g" || flag.includes("si" + "ng") || flag === "s" + "b" || flag === "s") {
-                        return new Response(JSON.stringify(buildSingBoxJsonProfile(clientHost, targetSub), null, 2), {
-                            headers: { "Content-Type": "application/json; charset=utf-8" }
-                        });
+
+                    if (isValidUser && targetUser) {
+                        let idClean = targetUser.id.replace(/-/g, '').toLowerCase();
+                        let sysU = sysUsageCache?.users?.[idClean] || { reqs: 0, dReqs: 0 };
+                        let totalReqs = sysU.reqs || 0;
+                        let limitTotal = 0;
+                        let expiryMs = 0;
+                        if (hasMultiUser) {
+                            limitTotal = targetUser.limitTotalReq || 0;
+                            expiryMs = targetUser.expiryMs || 0;
+                        } else {
+                            limitTotal = sysConfig.limitTotalReq || 0;
+                            expiryMs = sysConfig.expiryMs || 0;
+                        }
+                        
+                        let usedBytes = Math.floor(totalReqs * (1073741824 / 6000));
+                        let limitBytes = Math.floor(limitTotal * (1073741824 / 6000));
+                        let expireSec = expiryMs ? Math.floor(expiryMs / 1000) : 0;
+                        
+                        const subUserInfo = `upload=0; download=${usedBytes}; total=${limitBytes}; expire=${expireSec}`;
+                        resHeaders.set("Subscription-UserInfo", subUserInfo);
+                        resHeaders.set("subscription-userinfo", subUserInfo);
+                        resHeaders.set("Profile-Update-Interval", "12");
+                        resHeaders.set("profile-update-interval", "12");
+                        
+                        let cleanName = encodeURIComponent(targetUser.name);
+                        resHeaders.set("Content-Disposition", `attachment; filename="${cleanName}"; filename*=UTF-8''${cleanName}`);
                     }
 
-                    if (ua.includes(getGamma()) || ua.includes("meta") || ua.includes("sta" + "sh")) {
-                        return new Response(buildYamlProfile(clientHost, targetSub));
+                    // Determine subscription format
+                    let isClashYaml = false;
+                    let isSingboxJson = false;
+                    let isClashJson = false;
+
+                    // If flag is explicitly set, we respect it
+                    if (flag === "clash" || flag === "yaml" || flag === "meta" || flag === "stash" || flag === "clash-meta" || flag === "y") {
+                        isClashYaml = true;
+                    } else if (flag === "b" || flag === "c_legacy") {
+                        isClashJson = true;
+                    } else if (flag === "sing" || flag === "singbox" || flag === "sing-box" || flag === "sb" || flag === "s" || flag === "c" || flag === "g") {
+                        isSingboxJson = true;
+                    } else if (flag === "a" || flag === "raw" || flag === "") {
+                        // Safe auto-detect for raw sync or no-flag links using target browser / client User-Agent
+                        if (ua.includes(getGamma()) || ua.includes("meta") || ua.includes("sta" + "sh") || ua.includes("verge") || ua.includes("mihomo") || ua.includes("cfw") || ua.includes("stash") || ua.includes("clash")) {
+                            isClashYaml = true;
+                        } else if (ua.includes("sing-box") || ua.includes("singbox") || ua.includes("hiddify") || ua.includes("nekobox") || ua.includes("sfa") || ua.includes("karing") || ua.includes("v2rayng")) {
+                            isSingboxJson = true;
+                        }
+                    }
+
+                    if (isClashYaml) {
+                        resHeaders.set("Content-Type", "text/yaml; charset=utf-8");
+                        return new Response(buildYamlProfile(clientHost, targetSub, allowInsecure), {
+                            headers: resHeaders
+                        });
+                    } else if (isSingboxJson) {
+                        resHeaders.set("Content-Type", "application/json; charset=utf-8");
+                        return new Response(JSON.stringify(buildSingBoxJsonProfile(clientHost, targetSub, allowInsecure), null, 2), {
+                            headers: resHeaders
+                        });
+                    } else if (isClashJson) {
+                        resHeaders.set("Content-Type", "application/json; charset=utf-8");
+                        return new Response(JSON.stringify(buildClashJsonProfile(clientHost, targetSub, allowInsecure), null, 2), {
+                            headers: resHeaders
+                        });
                     } else {
-                        const raw = buildUriProfile(clientHost, targetSub);
-                        return new Response(btoa(raw));
+                        resHeaders.set("Content-Type", "text/plain; charset=utf-8");
+                        const raw = buildUriProfile(clientHost, targetSub, allowInsecure);
+                        return new Response(safeBtoa(raw), {
+                            headers: resHeaders
+                        });
                     }
                 }
             }
@@ -371,8 +449,6 @@ function serveSubscriptionInfoPage(user, host, url, request) {
     cleanUrl.searchParams.delete("raw");
     
     let syncNormal = cleanUrl.href;
-    let syncBeta = cleanUrl.href + (cleanUrl.href.includes('?') ? '&flag=b' : '?flag=b');
-    let syncGamma = cleanUrl.href + (cleanUrl.href.includes('?') ? '&flag=c' : '?flag=c');
     let syncRaw = cleanUrl.href + (cleanUrl.href.includes('?') ? '&flag=a' : '?flag=a');
 
     const html = `<!DOCTYPE html>
@@ -472,61 +548,22 @@ function serveSubscriptionInfoPage(user, host, url, request) {
 
         <!-- Connection Options -->
         <div class="space-y-6">
-            <!-- Normal Base64 Sub -->
+            <!-- Universal Client-Aware Sub -->
             <div class="bg-slate-900/50 border border-indigo-500/10 p-5 rounded-2xl relative">
                 <div class="flex items-center justify-between mb-3">
                     <div>
-                        <span class="text-xs font-bold text-emerald-400">Format Alpha Configuration</span>
-                        <p class="text-[11px] text-slate-400 mt-1">Standard serialized delivery stream for integrated system handlers.</p>
+                        <span class="text-xs font-bold text-emerald-400">Universal Auto-Detecting Configuration Link</span>
+                        <p class="text-[11px] text-slate-400 mt-1">This universal URL automatically detects your client (Clash, Sing-box, or base64 collectors) and delivers the perfect optimized subscription profile format.</p>
                     </div>
-                    <span class="text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded-md uppercase">Format A</span>
                 </div>
                 <div class="relative flex items-center">
-                    <input type="text" id="sub-norm" readonly value="${syncRaw}" class="w-full bg-slate-950 border border-indigo-500/10 px-4 py-3 rounded-xl text-xs font-mono text-slate-400 pr-16 truncate outline-none">
+                    <input type="text" id="sub-norm" readonly value="${syncNormal}" class="w-full bg-slate-950 border border-indigo-500/10 px-4 py-3 rounded-xl text-xs font-mono text-slate-400 pr-16 truncate outline-none">
                     <div class="absolute right-2 flex gap-1">
                         <button onclick="copyLink('sub-norm')" class="p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs transition-colors">Copy</button>
-                        <button onclick="showQRModal('Format Alpha Sync', '${syncRaw}')" class="p-2 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-lg text-xs transition-colors">QR</button>
+                        <button onclick="showQRModal('Universal Subscription Sync Link', '${syncNormal}')" class="p-2 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-lg text-xs transition-colors">QR</button>
                     </div>
                 </div>
-                <p class="text-[10px] text-slate-500 mt-2">Compatible with various standard base64 collectors.</p>
-            </div>
-
-            <!-- Format B Sub -->
-            <div class="bg-slate-900/50 border border-indigo-500/10 p-5 rounded-2xl relative">
-                <div class="flex items-center justify-between mb-3">
-                    <div>
-                        <span class="text-xs font-bold text-amber-400">Format Beta Configuration (YAML)</span>
-                        <p class="text-[11px] text-slate-400 mt-1">Structured YAML stream optimized for advanced system diagnostics mapping.</p>
-                    </div>
-                    <span class="text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/25 px-2 py-0.5 rounded-md uppercase">Format B</span>
-                </div>
-                <div class="relative flex items-center">
-                    <input type="text" id="sub-beta" readonly value="${syncBeta}" class="w-full bg-slate-950 border border-indigo-500/10 px-4 py-3 rounded-xl text-xs font-mono text-slate-400 pr-16 truncate outline-none">
-                    <div class="absolute right-2 flex gap-1">
-                        <button onclick="copyLink('sub-beta')" class="p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs transition-colors">Copy</button>
-                        <button onclick="showQRModal('Format Beta Sync', '${syncBeta}')" class="p-2 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-lg text-xs transition-colors">QR</button>
-                    </div>
-                </div>
-                <p class="text-[10px] text-slate-500 mt-2">Provides pre-formatted target structures in lightweight YAML layout.</p>
-            </div>
-
-            <!-- Format C Sub -->
-            <div class="bg-slate-900/50 border border-indigo-500/10 p-5 rounded-2xl relative">
-                <div class="flex items-center justify-between mb-3">
-                    <div>
-                        <span class="text-xs font-bold text-violet-400">Format Gamma Configuration (JSON)</span>
-                        <p class="text-[11px] text-slate-400 mt-1">Consolidated direct profile blocks exported in lightweight JSON syntax.</p>
-                    </div>
-                    <span class="text-[9px] font-bold bg-violet-500/10 text-violet-400 border border-violet-500/25 px-2 py-0.5 rounded-md uppercase">Format C</span>
-                </div>
-                <div class="relative flex items-center">
-                    <input type="text" id="sub-gamma" readonly value="${syncGamma}" class="w-full bg-slate-950 border border-indigo-500/10 px-4 py-3 rounded-xl text-xs font-mono text-slate-400 pr-16 truncate outline-none">
-                    <div class="absolute right-2 flex gap-1">
-                        <button onclick="copyLink('sub-gamma')" class="p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs transition-colors">Copy</button>
-                        <button onclick="showQRModal('Format Gamma Sync', '${syncGamma}')" class="p-2 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-lg text-xs transition-colors">QR</button>
-                    </div>
-                </div>
-                <p class="text-[10px] text-slate-500 mt-2">Unified diagnostic payload syntax designed for compatible collectors.</p>
+                <p class="text-[10px] text-slate-500 mt-2">Allows real-time import of complete nodes list with dynamic configuration update capability.</p>
             </div>
         </div>
 
@@ -1535,8 +1572,51 @@ function getTransportParams(port) {
     return ["80", "8080", "8880", "2052", "2082", "2086", "2095"].includes(port.toString()) ? "none" : "tls";
 }
 
-function getCleanIps(hostName) {
-    let ips = sysConfig.cleanIps ? sysConfig.cleanIps.split(/[\r\n,;]+/).map(s => s.trim()).filter(Boolean) : [];
+function getSubscriptionStats(targetSub = null) {
+    let name = "Default";
+    let id = activeDeviceId;
+    let limitTotalReq = 0;
+    let expiryMs = 0;
+    
+    let hasMultiUser = (sysConfig.users && sysConfig.users.length > 0);
+    if (hasMultiUser && targetSub) {
+        let user = sysConfig.users.find(u => u.name.toLowerCase() === targetSub.toLowerCase() || u.id === targetSub);
+        if (user) {
+            name = user.name;
+            id = user.id;
+            limitTotalReq = user.limitTotalReq || 0;
+            expiryMs = user.expiryMs || 0;
+        }
+    } else if (!hasMultiUser) {
+        limitTotalReq = sysConfig.limitTotalReq || 0;
+        expiryMs = sysConfig.expiryMs || 0;
+    }
+    
+    let idClean = id.replace(/-/g, '').toLowerCase();
+    let sysU = sysUsageCache?.users?.[idClean] || { reqs: 0, dReqs: 0 };
+    let totalReqs = sysU.reqs || 0;
+    
+    let totalGb = (totalReqs / 6000).toFixed(2);
+    let limitTotalGb = limitTotalReq ? (limitTotalReq / 6000).toFixed(2) : 'Unlimited';
+    
+    let expiryDateTxt = 'Never Expire';
+    let remDaysTxt = 'Never Expire';
+    if (expiryMs) {
+        let exp = new Date(expiryMs);
+        expiryDateTxt = exp.toISOString().split('T')[0];
+        let remDays = Math.ceil((expiryMs - Date.now()) / (1000 * 60 * 60 * 24));
+        remDaysTxt = remDays >= 0 ? `${remDays} Days Left` : 'Expired';
+    }
+    
+    return {
+        usedStr: `Used: ${totalGb} GB / ${limitTotalGb} GB`,
+        expiryStr: `Expiry: ${expiryDateTxt} (${remDaysTxt})`
+    };
+}
+
+function getCleanIps(hostName, userCleanIps = null) {
+    let rawIps = userCleanIps || sysConfig.cleanIps;
+    let ips = rawIps ? rawIps.split(/[\r\n,;]+/).map(s => s.trim()).filter(Boolean) : [];
     if (ips.length === 0) ips = [hostName.endsWith('.pages.dev') ? sysConfig.metricNode : hostName];
     return ips;
 }
@@ -1559,7 +1639,7 @@ function getAllProfiles(targetSub = null) {
                 if (usr.lastDay === new Date().toISOString().split('T')[0] && usr.dReqs >= u.limitDailyReq) skip = true;
             }
             if(!skip) {
-                list.push({ id: u.id, name: u.name });
+                list.push({ id: u.id, name: u.name, proxyIp: u.proxyIp });
             }
         });
     }
@@ -1604,7 +1684,7 @@ function getConfigName(type, profileName, port, hostName, ip) {
     }
 }
 
-function buildUriProfile(hostName, targetSub = null) {
+function buildUriProfile(hostName, targetSub = null, allowInsecure = false) {
     let allHostNames = [hostName];
     if (sysConfig.slaveNodes) allHostNames.push(...sysConfig.slaveNodes.split(/[\r\n,;]+/).map(s=>s.trim()).filter(Boolean));
     
@@ -1614,13 +1694,20 @@ function buildUriProfile(hostName, targetSub = null) {
     let lines = [];
     let profiles = getAllProfiles(targetSub);
     
+    // Add fake configs
+    let stats = getSubscriptionStats(targetSub);
+    let fakeU1 = `trojan://00000000-0000-0000-0000-000000000000@127.0.0.1:1080?encryption=none&security=none#${encodeURIComponent("📊 " + stats.usedStr)}`;
+    let fakeU2 = `trojan://00000000-0000-0000-0000-000000000000@127.0.0.1:1080?encryption=none&security=none#${encodeURIComponent("📅 " + stats.expiryStr)}`;
+    lines.push(fakeU1, fakeU2);
+    
     profiles.forEach(p => {
         allHostNames.forEach(hName => {
-            let ips = getCleanIps(hName);
+            let ips = getCleanIps(hName, p.proxyIp);
             ports.forEach(port => {
                 let sec = getTransportParams(port);
                 let extBase = `encryption=none&security=${sec}&sni=${hName}&fp=${sysConfig.agent}&type=ws&host=${hName}&path=${reqPath}`;
                 if (sysConfig.enableOpt2) extBase += `&pbk=enabled`;
+                extBase += `&allowInsecure=${allowInsecure ? "1" : "0"}`;
                 ips.forEach(ip => {
                     let vName = getConfigName("alpha", p.name, port, hName, ip);
                     let tName = getConfigName("beta", p.name, port, hName, ip);
@@ -1638,7 +1725,7 @@ function buildUriProfile(hostName, targetSub = null) {
     return lines.join('\n');
 }
 
-function buildYamlProfile(hostName, targetSub = null) {
+function buildYamlProfile(hostName, targetSub = null, allowInsecure = false) {
     let allHostNames = [hostName];
     if (sysConfig.slaveNodes) allHostNames.push(...sysConfig.slaveNodes.split(/[\r\n,;]+/).map(s=>s.trim()).filter(Boolean));
     
@@ -1647,6 +1734,13 @@ function buildYamlProfile(hostName, targetSub = null) {
     let proxyNames = [];
     let nameCounts = {}; // Track proxy names for deduplication
     let profiles = getAllProfiles(targetSub);
+
+    // Add fake configs
+    let stats = getSubscriptionStats(targetSub);
+    let fake1 = `📊 ${stats.usedStr}`;
+    let fake2 = `📅 ${stats.expiryStr}`;
+    proxies.push(`- name: "${fake1}"\n  type: ${getBeta()}\n  server: 127.0.0.1\n  port: 80\n  password: "${activeDeviceId}"\n  udp: true\n  tls: false`);
+    proxies.push(`- name: "${fake2}"\n  type: ${getBeta()}\n  server: 127.0.0.1\n  port: 80\n  password: "${activeDeviceId}"\n  udp: true\n  tls: false`);
 
     const getUniqueName = (baseName) => {
         if (!nameCounts[baseName]) {
@@ -1666,7 +1760,7 @@ function buildYamlProfile(hostName, targetSub = null) {
 
     profiles.forEach(p => {
         allHostNames.forEach(hName => {
-            let ips = getCleanIps(hName);
+            let ips = getCleanIps(hName, p.proxyIp);
             ports.forEach(port => {
                 let sec = getTransportParams(port) === "tls" ? "true" : "false";
                 ips.forEach(ip => {
@@ -1674,21 +1768,122 @@ function buildYamlProfile(hostName, targetSub = null) {
                         let vName = getConfigName("alpha", p.name, port, hName, ip);
                         vName = getUniqueName(vName);
                         proxyNames.push(`"${vName}"`);
-                        proxies.push(`- name: "${vName}"\n  type: ${getAlpha()}\n  server: ${ip}\n  port: ${port}\n  uuid: ${p.id}\n  udp: true\n  tls: ${sec}\n  sni: ${hName}\n  client-fingerprint: ${sysConfig.agent}\n  network: ws\n  ws-opts:\n    path: "/${sysConfig.apiRoute}"\n    headers: { Host: ${hName} }\n${sysConfig.enableOpt1 ? "  tfo: true" : ""}`);
+                        
+                        let randomJunk = Array.from({length: 11}, () => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[Math.floor(Math.random() * 62)]).join('');
+                        let payloadVl = { junk: randomJunk, protocol: "vl", mode: "proxyip", panelIPs: [] };
+                        let pathStrVl = "/" + btoa(JSON.stringify(payloadVl));
+
+                        proxies.push(`- name: "${vName}"\n  type: ${getAlpha()}\n  server: ${ip}\n  port: ${port}\n  uuid: ${p.id}\n  udp: true\n  tls: ${sec}\n  servername: ${hName}\n  client-fingerprint: ${sysConfig.agent || "random"}\n  network: ws\n  ws-opts:\n    path: "${pathStrVl}"\n    headers:\n      Host: ${hName}\n  skip-cert-verify: ${allowInsecure}\n${sysConfig.enableOpt1 ? "  tfo: true" : ""}`);
                     }
 
                     if (sysConfig.mode === "beta" || sysConfig.mode === "both") {
                         let tName = getConfigName("beta", p.name, port, hName, ip);
                         tName = getUniqueName(tName);
                         proxyNames.push(`"${tName}"`);
-                        proxies.push(`- name: "${tName}"\n  type: ${getBeta()}\n  server: ${ip}\n  port: ${port}\n  password: ${p.id}\n  udp: true\n  tls: ${sec}\n  sni: ${hName}\n  client-fingerprint: ${sysConfig.agent}\n  network: ws\n  ws-opts:\n    path: "/${sysConfig.apiRoute}"\n    headers: { Host: ${hName} }\n${sysConfig.enableOpt1 ? "  tfo: true" : ""}`);
+                        
+                        let randomJunk = Array.from({length: 11}, () => "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"[Math.floor(Math.random() * 62)]).join('');
+                        let payloadTr = { junk: randomJunk, protocol: "tr", mode: "proxyip", panelIPs: [] };
+                        let pathStrTr = "/" + btoa(JSON.stringify(payloadTr));
+
+                        proxies.push(`- name: "${tName}"\n  type: ${getBeta()}\n  server: ${ip}\n  port: ${port}\n  password: ${p.id}\n  udp: true\n  tls: ${sec}\n  sni: ${hName}\n  client-fingerprint: ${sysConfig.agent || "random"}\n  network: ws\n  ws-opts:\n    path: "${pathStrTr}"\n    headers:\n      Host: ${hName}\n  skip-cert-verify: ${allowInsecure}\n${sysConfig.enableOpt1 ? "  tfo: true" : ""}`);
                     }
                 });
             });
         });
     });
 
-    return `proxies:\n${proxies.join('\n')}\nproxy-groups:\n  - name: "💦 Best Ping 🚀"\n    type: url-test\n    url: "https://www.gstatic.com/generate_204"\n    interval: 30\n    tolerance: 50\n    proxies:\n${proxyNames.map(n => `      - ${n}`).join('\n')}\n  - name: Data Group\n    type: select\n    proxies: \n      - "💦 Best Ping 🚀"\n${proxyNames.map(n => `      - ${n}`).join('\n')}\nrules:\n  - MATCH,Data Group\n`;
+    let bestPingProxies = proxyNames.map(n => `      - ${n}`).join('\n');
+    let allProxies = proxyNames.map(n => `      - ${n}`).join('\n');
+
+    return `mixed-port: 7890
+ipv6: true
+allow-lan: false
+unified-delay: false
+log-level: warning
+mode: rule
+disable-keep-alive: false
+keep-alive-idle: 10
+keep-alive-interval: 15
+tcp-concurrent: true
+geo-auto-update: true
+geo-update-interval: 168
+external-controller: 127.0.0.1:9090
+external-controller-cors:
+  allow-origins:
+    - "*"
+  allow-private-network: true
+external-ui: ui
+external-ui-url: "https://github.com/MetaCubeX/metacubexd/archive/refs/heads/gh-pages.zip"
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+dns:
+  enable: true
+  respect-rules: true
+  use-system-hosts: false
+  listen: 127.0.0.1:1053
+  ipv6: true
+  hosts:
+    "rule-set:category-ads-all": "rcode://refused"
+  nameserver:
+    - "https://8.8.8.8/dns-query#✅ Selector"
+  proxy-server-nameserver:
+    - "8.8.8.8#DIRECT"
+  direct-nameserver:
+    - "8.8.8.8#DIRECT"
+  direct-nameserver-follow-policy: true
+  enhanced-mode: redir-host
+
+tun:
+  enable: true
+  stack: mixed
+  auto-route: true
+  strict-route: true
+  auto-detect-interface: true
+  dns-hijack:
+    - "any:53"
+    - "tcp://any:53"
+  mtu: 9000
+
+sniffer:
+  enable: true
+  force-dns-mapping: true
+  parse-pure-ip: true
+  override-destination: true
+  sniff:
+    HTTP:
+      ports: [80, 8080, 8880, 2052, 2082, 2086, 2095]
+    TLS:
+      ports: [443, 8443, 2053, 2083, 2087, 2096]
+
+proxies:
+${proxies.join('\n')}
+
+proxy-groups:
+  - name: "✅ Selector"
+    type: select
+    proxies:
+      - "💦 Best Ping 🚀"
+      - "${fake1}"
+      - "${fake2}"
+${allProxies}
+  - name: "💦 Best Ping 🚀"
+    type: url-test
+    url: "https://www.gstatic.com/generate_204"
+    interval: 30
+    tolerance: 50
+    proxies:
+${bestPingProxies}
+
+rules:
+  - DOMAIN-SUFFIX,ir,DIRECT
+  - DOMAIN-KEYWORD,gov.ir,DIRECT
+  - DOMAIN-SUFFIX,fa,DIRECT
+  - GEOIP,IR,DIRECT
+  - MATCH,✅ Selector
+`;
 }
 
 // Obfuscated string keys to prevent Cloudflare scanners block on vpn/proxy keywords
@@ -1704,7 +1899,7 @@ function getIpTypeLabel(ip) {
     return "Domain";
 }
 
-function buildClashJsonProfile(hostName, targetSub = null) {
+function buildClashJsonProfile(hostName, targetSub = null, allowInsecure = false) {
     let allHostNames = [hostName];
     if (sysConfig.slaveNodes) allHostNames.push(...sysConfig.slaveNodes.split(/[\r\n,;]+/).map(s=>s.trim()).filter(Boolean));
     let ports = sysConfig.socketPorts ? sysConfig.socketPorts.split(',').map(s=>s.trim()).filter(Boolean) : ["443"];
@@ -1714,6 +1909,29 @@ function buildClashJsonProfile(hostName, targetSub = null) {
     let proxiesArr = [];
     let dynamicTags = [];
     let nameCounts = {};
+
+    // Add fake configs
+    let stats = getSubscriptionStats(targetSub);
+    let fake1 = `📊 ${stats.usedStr}`;
+    let fake2 = `📅 ${stats.expiryStr}`;
+    proxiesArr.push({
+        "name": fake1,
+        "type": k_tr_mode,
+        "server": "127.0.0.1",
+        "port": 80,
+        "password": activeDeviceId,
+        "tls": false,
+        "udp": true
+    });
+    proxiesArr.push({
+        "name": fake2,
+        "type": k_tr_mode,
+        "server": "127.0.0.1",
+        "port": 80,
+        "password": activeDeviceId,
+        "tls": false,
+        "udp": true
+    });
 
     const getUniqueName = (baseName) => {
         if (!nameCounts[baseName]) {
@@ -1733,7 +1951,7 @@ function buildClashJsonProfile(hostName, targetSub = null) {
 
     profiles.forEach(p => {
         allHostNames.forEach(hName => {
-            let ips = getCleanIps(hName);
+            let ips = getCleanIps(hName, p.proxyIp);
             ports.forEach(port => {
                 let sec = getTransportParams(port) === "tls";
                 ips.forEach(ip => {
@@ -1762,7 +1980,7 @@ function buildClashJsonProfile(hostName, targetSub = null) {
                             "tls": sec,
                             "servername": hName,
                             "client-fingerprint": sysConfig.agent || "random",
-                            "skip-cert-verify": false,
+                            "skip-cert-verify": allowInsecure,
                             "alpn": ["http/1.1"],
                             "network": "ws",
                             "ws-opts": {
@@ -1805,7 +2023,7 @@ function buildClashJsonProfile(hostName, targetSub = null) {
                             "tls": sec,
                             "sni": hName,
                             "client-fingerprint": sysConfig.agent || "random",
-                            "skip-cert-verify": false,
+                            "skip-cert-verify": allowInsecure,
                             "alpn": ["http/1.1"],
                             "network": "ws",
                             "ws-opts": {
@@ -1910,7 +2128,7 @@ function buildClashJsonProfile(hostName, targetSub = null) {
             {
                 "name": "✅ Selector",
                 "type": "select",
-                "proxies": ["💦 Best Ping 🚀", ...dynamicTags]
+                "proxies": ["💦 Best Ping 🚀", fake1, fake2, ...dynamicTags]
             },
             {
                 "name": "💦 Best Ping 🚀",
@@ -1964,7 +2182,7 @@ function buildClashJsonProfile(hostName, targetSub = null) {
     };
 }
 
-function buildSingBoxJsonProfile(hostName, targetSub = null) {
+function buildSingBoxJsonProfile(hostName, targetSub = null, allowInsecure = false) {
     let allHostNames = [hostName];
     if (sysConfig.slaveNodes) allHostNames.push(...sysConfig.slaveNodes.split(/[\r\n,;]+/).map(s=>s.trim()).filter(Boolean));
     let ports = sysConfig.socketPorts ? sysConfig.socketPorts.split(',').map(s=>s.trim()).filter(Boolean) : ["443"];
@@ -1974,6 +2192,19 @@ function buildSingBoxJsonProfile(hostName, targetSub = null) {
     let outboundsArr = [];
     let dynamicTags = [];
     let nameCounts = {};
+
+    // Add fake configs
+    let stats = getSubscriptionStats(targetSub);
+    let fake1 = `📊 ${stats.usedStr}`;
+    let fake2 = `📅 ${stats.expiryStr}`;
+    outboundsArr.push({
+        "type": "direct",
+        "tag": fake1
+    });
+    outboundsArr.push({
+        "type": "direct",
+        "tag": fake2
+    });
 
     const getUniqueName = (baseName) => {
         if (!nameCounts[baseName]) {
@@ -1993,7 +2224,7 @@ function buildSingBoxJsonProfile(hostName, targetSub = null) {
 
     profiles.forEach(p => {
         allHostNames.forEach(hName => {
-            let ips = getCleanIps(hName);
+            let ips = getCleanIps(hName, p.proxyIp);
             ports.forEach(port => {
                 let sec = getTransportParams(port) === "tls";
                 ips.forEach(ip => {
@@ -2021,8 +2252,7 @@ function buildSingBoxJsonProfile(hostName, targetSub = null) {
                             "tls": {
                                 "enabled": sec,
                                 "server_name": hName,
-                                "record_fragment": false,
-                                "insecure": false,
+                                "insecure": allowInsecure,
                                 "alpn": ["http/1.1"],
                                 "utls": {
                                     "enabled": true,
@@ -2039,12 +2269,6 @@ function buildSingBoxJsonProfile(hostName, targetSub = null) {
                                 }
                             }
                         };
-                        if (sysConfig.enableOpt2) {
-                             ob.tls.ech = {
-                                 "enabled": true,
-                                 "config": "-----BEGIN ECH CONFIGS-----\nAEX+DQBBTwAgACCfCTo0YCUiDF1bGU9Z72l8Bs1gVxt6D6FefjfzaJHcfwAEAAEAAQASY2xvdWRmbGFyZS1lY2guY29tAAA=\n-----END ECH CONFIGS-----"
-                             };
-                        }
                         outboundsArr.push(ob);
                     }
 
@@ -2068,8 +2292,7 @@ function buildSingBoxJsonProfile(hostName, targetSub = null) {
                             "tls": {
                                 "enabled": sec,
                                 "server_name": hName,
-                                "record_fragment": false,
-                                "insecure": false,
+                                "insecure": allowInsecure,
                                 "alpn": ["http/1.1"],
                                 "utls": {
                                     "enabled": true,
@@ -2086,12 +2309,6 @@ function buildSingBoxJsonProfile(hostName, targetSub = null) {
                                 }
                             }
                         };
-                        if (sysConfig.enableOpt2) {
-                             ob.tls.ech = {
-                                 "enabled": true,
-                                 "config": "-----BEGIN ECH CONFIGS-----\nAEX+DQBBTwAgACCfCTo0YCUiDF1bGU9Z72l8Bs1gVxt6D6FefjfzaJHcfwAEAAEAAQASY2xvdWRmbGFyZS1lY2guY29tAAA=\n-----END ECH CONFIGS-----"
-                             };
-                        }
                         outboundsArr.push(ob);
                     }
                 });
@@ -2132,12 +2349,10 @@ function buildSingBoxJsonProfile(hostName, targetSub = null) {
                     "server": "dns-remote"
                 },
                 {
-                    "domain_suffix": allHostNames,
                     "query_type": [
                         "HTTPS"
                     ],
-                    "action": "route",
-                    "server": "dns-direct"
+                    "action": "reject"
                 },
                 {
                     "rule_set": [
@@ -2191,6 +2406,8 @@ function buildSingBoxJsonProfile(hostName, targetSub = null) {
                 "tag": "✅ Selector",
                 "outbounds": [
                     "💦 Best Ping 🚀",
+                    fake1,
+                    fake2,
                     ...dynamicTags
                 ],
                 "interrupt_exist_connections": false
@@ -2284,18 +2501,12 @@ function buildSingBoxJsonProfile(hostName, targetSub = null) {
                 }
             ],
             "auto_detect_interface": true,
-            "default_domain_resolver": {
-                "server": "dns-direct",
-                "strategy": "prefer_ipv4",
-                "rewrite_ttl": 60
-            },
             "final": "✅ Selector"
         },
         "ntp": {
             "enabled": true,
             "server": "time.cloudflare.com",
             "server_port": 123,
-            "domain_resolver": "dns-direct",
             "interval": "30m",
             "write_to_system": false
         },
@@ -2639,21 +2850,33 @@ function getDashboardUI(hasDB) {
                   <div class="max-w-4xl mx-auto space-y-6 fade-in">
 
                       <!-- Update Banner -->
-                      <div id="update-alert-banner" class="hidden bg-gradient-to-r from-amber-500/10 to-primary/10 border-2 border-amber-300 dark:border-amber-950/20 rounded-3xl p-6 shadow-md flex-col sm:flex-row items-center justify-between gap-4 fade-in">
-                          <div class="flex items-center space-x-4 space-x-reverse text-start w-full">
-                              <div class="p-3 bg-amber-500/10 text-amber-500 rounded-2xl shrink-0">
-                                  <svg class="w-6 h-6 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13l-3 3m0 0l-3-3m3 3V8m0 13a9 9 0 110-18 9 9 0 010 18z"></path></svg>
+                      <div id="update-alert-banner" class="hidden bg-gradient-to-r from-amber-500/10 to-primary/10 border-2 border-amber-300 dark:border-amber-950/20 rounded-3xl p-6 shadow-md flex-col items-center justify-between gap-4 fade-in">
+                          <div class="flex flex-col sm:flex-row items-center justify-between gap-4 w-full">
+                              <div class="flex items-center space-x-4 space-x-reverse text-start w-full">
+                                  <div class="p-3 bg-amber-500/10 text-amber-500 rounded-2xl shrink-0">
+                                      <svg class="w-6 h-6 animate-bounce" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13l-3 3m0 0l-3-3m3 3V8m0 13a9 9 0 110-18 9 9 0 010 18z"></path></svg>
+                                  </div>
+                                  <div>
+                                      <h4 class="font-black text-amber-800 dark:text-amber-400 text-base" data-i18n="update_avail">New version available!</h4>
+                                      <p id="update-alert-text" class="text-xs text-slate-500 dark:text-slate-400 mt-1"></p>
+                                  </div>
                               </div>
-                              <div>
-                                  <h4 class="font-black text-amber-800 dark:text-amber-400 text-base" data-i18n="update_avail">New version available!</h4>
-                                  <p id="update-alert-text" class="text-xs text-slate-500 dark:text-slate-400 mt-1"></p>
+                              <div class="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
+                                  <button onclick="dismissUpdate()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-colors" data-i18n="btn_cancel">Cancel</button>
+                                  <a id="update-alert-btn" href="https://github.com/itsyebekhe/nahan" target="_blank" class="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-1.5" data-i18n="update_btn">
+                                      Get Latest Code ➜
+                                  </a>
                               </div>
                           </div>
-                          <div class="flex gap-2 w-full sm:w-auto shrink-0 justify-end">
-                              <button onclick="dismissUpdate()" class="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold rounded-xl text-xs transition-colors" data-i18n="btn_cancel">Cancel</button>
-                              <a id="update-alert-btn" href="https://github.com/itsyebekhe/nahan" target="_blank" class="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl text-xs transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-1.5" data-i18n="update_btn">
-                                  Get Latest Code ➜
-                              </a>
+                          <!-- Dynamic Changelog Section -->
+                          <div id="update-changelog-area" class="hidden w-full border-t border-amber-300/30 dark:border-amber-950/20 pt-4 mt-2">
+                              <h5 class="text-xs font-bold text-amber-800 dark:text-amber-400 mb-2 flex items-center gap-1.5">
+                                  <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                                  <span data-i18n="changelog_title">Changelog of New Version:</span>
+                              </h5>
+                              <div id="update-changelog-content" class="text-xs text-slate-600 dark:text-slate-400 bg-amber-500/[0.04] dark:bg-slate-900/40 p-4 rounded-2xl max-h-48 overflow-y-auto font-sans leading-relaxed border border-amber-200/20 max-w-none text-start">
+                                  <p class="animate-pulse">Loading changelog...</p>
+                              </div>
                           </div>
                       </div>
 
@@ -2731,23 +2954,89 @@ function getDashboardUI(hasDB) {
                                       <option value="both">Both (V-Core & T-Core)</option>
                                   </select>
                               </div>
-                              <div class="space-y-1">
-                                  <label class="block text-sm font-bold text-slate-600 dark:text-slate-300 ms-1" data-i18n="lbl_port">Data Port (Multi-Select)</label>
-                                  <select id="cfg-port" multiple class="w-full h-32 px-4 py-3 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary focus:ring-1 outline-none text-sm font-mono">
-                                      <option value="443" selected>443 (Secure TLS)</option>
-                                      <option value="2053">2053 (Secure TLS)</option>
-                                      <option value="2083">2083 (Secure TLS)</option>
-                                      <option value="2087">2087 (Secure TLS)</option>
-                                      <option value="2096">2096 (Secure TLS)</option>
-                                      <option value="8443">8443 (Secure TLS)</option>
-                                      <option value="80">80 (Standard)</option>
-                                      <option value="8080">8080 (Alt Standard)</option>
-                                      <option value="8880">8880 (Alt Standard)</option>
-                                      <option value="2052">2052 (Alt Standard)</option>
-                                      <option value="2082">2082 (Alt Standard)</option>
-                                      <option value="2086">2086 (Alt Standard)</option>
-                                      <option value="2095">2095 (Alt Standard)</option>
+                               <div class="space-y-1">
+                                  <label class="block text-sm font-bold text-slate-600 dark:text-slate-300 ms-1" data-i18n="lbl_port">Data Port (Checkbox Selection)</label>
+                                  <select id="cfg-port" multiple class="hidden">
+                                      <option value="443">443</option>
+                                      <option value="2053">2053</option>
+                                      <option value="2083">2083</option>
+                                      <option value="2087">2087</option>
+                                      <option value="2096">2096</option>
+                                      <option value="8443">8443</option>
+                                      <option value="80">80</option>
+                                      <option value="8080">8080</option>
+                                      <option value="8880">8880</option>
+                                      <option value="2052">2052</option>
+                                      <option value="2082">2082</option>
+                                      <option value="2086">2086</option>
+                                      <option value="2095">2095</option>
                                   </select>
+                                  <div id="port-checkboxes-container" class="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-darkborder p-4 rounded-xl space-y-3 font-mono text-xs max-h-48 overflow-y-auto">
+                                      <!-- TLS ports -->
+                                      <div class="space-y-1.5">
+                                          <div class="text-[10px] uppercase tracking-wider font-bold text-slate-400 dark:text-slate-500">🔒 Secure (TLS)</div>
+                                          <div class="grid grid-cols-2 gap-2">
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="443" onchange="togglePortCheckbox('443', this.checked)" class="accent-primary">
+                                                  <span>443</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="2053" onchange="togglePortCheckbox('2053', this.checked)" class="accent-primary">
+                                                  <span>2053</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="2083" onchange="togglePortCheckbox('2083', this.checked)" class="accent-primary">
+                                                  <span>2083</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="2087" onchange="togglePortCheckbox('2087', this.checked)" class="accent-primary">
+                                                  <span>2087</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="2096" onchange="togglePortCheckbox('2096', this.checked)" class="accent-primary">
+                                                  <span>2096</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="8443" onchange="togglePortCheckbox('8443', this.checked)" class="accent-primary">
+                                                  <span>8443</span>
+                                              </label>
+                                          </div>
+                                      </div>
+                                      <!-- Non-TLS ports -->
+                                      <div class="space-y-1.5 pt-1 border-t border-slate-200 dark:border-slate-700">
+                                          <div class="text-[10px] uppercase tracking-wider font-bold text-slate-400 dark:text-slate-500">🔓 Standard</div>
+                                          <div class="grid grid-cols-2 gap-2">
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="80" onchange="togglePortCheckbox('80', this.checked)" class="accent-primary">
+                                                  <span>80</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="8080" onchange="togglePortCheckbox('8080', this.checked)" class="accent-primary">
+                                                  <span>8080</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="8880" onchange="togglePortCheckbox('8880', this.checked)" class="accent-primary">
+                                                  <span>8880</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="2052" onchange="togglePortCheckbox('2052', this.checked)" class="accent-primary">
+                                                  <span>2052</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="2082" onchange="togglePortCheckbox('2082', this.checked)" class="accent-primary">
+                                                  <span>2082</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition">
+                                                  <input type="checkbox" value="2086" onchange="togglePortCheckbox('2086', this.checked)" class="accent-primary">
+                                                  <span>2086</span>
+                                              </label>
+                                              <label class="flex items-center gap-2 p-1.5 rounded bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 cursor-pointer hover:border-primary transition col-span-2">
+                                                  <input type="checkbox" value="2095" onchange="togglePortCheckbox('2095', this.checked)" class="accent-primary">
+                                                  <span>2095</span>
+                                              </label>
+                                          </div>
+                                      </div>
+                                  </div>
                               </div>
                               <div class="space-y-1 md:col-span-2">
                                   <div class="flex justify-between items-center">
@@ -3028,6 +3317,10 @@ function getDashboardUI(hasDB) {
                                       <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="limit_days">Expiration limit (Days) - Leave empty for unlimited</label>
                                       <input type="number" id="add-user-days" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none">
                                   </div>
+                                  <div>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1">User Proxy IP(s) (Optional - overrides global Clean IP, comma/newline separated)</label>
+                                      <input type="text" id="add-user-proxy-ip" placeholder="e.g. 104.20.0.1, proxyip.com" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
+                                  </div>
                                   <div class="flex justify-end gap-2 mt-6">
                                       <button onclick="document.getElementById('modal-add-user').classList.add('hidden')" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold" data-i18n="btn_cancel">Cancel</button>
                                       <button onclick="commitAddUser()" class="px-4 py-2 rounded-xl bg-primary text-white font-bold" data-i18n="save_btn_user">Save User</button>
@@ -3057,6 +3350,10 @@ function getDashboardUI(hasDB) {
                                   <div>
                                       <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="limit_days">Expiration limit (Days remaining) - Leave empty for unlimited</label>
                                       <input type="number" id="edit-user-days" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none">
+                                  </div>
+                                  <div>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1">User Proxy IP(s) (Optional - overrides global Clean IP, comma/newline separated)</label>
+                                      <input type="text" id="edit-user-proxy-ip" placeholder="e.g. 104.20.0.1, proxyip.com" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
                                   </div>
                                   <div class="flex justify-end gap-2 mt-6">
                                       <button onclick="document.getElementById('modal-edit-user').classList.add('hidden')" class="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold" data-i18n="btn_cancel">Cancel</button>
@@ -3154,7 +3451,7 @@ function getDashboardUI(hasDB) {
                       </div>
                       <div>
                           <h3 class="text-lg font-black text-slate-800 dark:text-white" data-i18n="v_pop_title">Version Update</h3>
-                          <span class="text-[10px] font-bold px-2 py-0.5 bg-indigo-500 text-white rounded-full tracking-wide">v2.4.7</span>
+                          <span class="text-[10px] font-bold px-2 py-0.5 bg-indigo-500 text-white rounded-full tracking-wide">v2.4.8</span>
                       </div>
                   </div>
                   <button onclick="closeVersionModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-white bg-slate-50 dark:bg-slate-800 p-2 rounded-xl border border-slate-100 dark:border-darkborder transition-colors">
@@ -3170,11 +3467,35 @@ function getDashboardUI(hasDB) {
                       <h4 class="text-sm font-black text-slate-700 dark:text-white mt-1" data-i18n="v_pop_headline">Bug Fixes & Improvements</h4>
                   </div>
                   
-                  <div class="space-y-4 max-h-[40vh] overflow-y-auto pe-2">
+                  <div class="space-y-4 max-h-[40vh] overflow-y-auto pe-2 text-start">
                       <div class="flex gap-3">
-                          <div class="text-rose-500 mt-1">✨</div>
+                          <div class="text-primary mt-1">✨</div>
                           <div>
-                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b7_title">دانگرید پنل</strong>
+                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b1_title">Fixed NTP configuration schema validation</strong>
+                          </div>
+                      </div>
+                      <div class="flex gap-3">
+                          <div class="text-primary mt-1">✨</div>
+                          <div>
+                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b2_title">Removed deprecated resolver fields</strong>
+                          </div>
+                      </div>
+                      <div class="flex gap-3">
+                          <div class="text-primary mt-1">✨</div>
+                          <div>
+                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b3_title">Improved route rules and HTTPS handling</strong>
+                          </div>
+                      </div>
+                      <div class="flex gap-3">
+                          <div class="text-primary mt-1">✨</div>
+                          <div>
+                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b4_title">Added automatic changelog fetching for repository updates</strong>
+                          </div>
+                      </div>
+                      <div class="flex gap-3">
+                          <div class="text-primary mt-1">✨</div>
+                          <div>
+                              <strong class="text-xs font-black text-slate-700 dark:text-slate-300" data-i18n="v_pop_b5_title">Obsolete and duplicate route definition cleanup</strong>
                           </div>
                       </div>
                   </div>
@@ -3187,7 +3508,7 @@ function getDashboardUI(hasDB) {
       </div>
   
       <script>
-          const CURRENT_VERSION = "2.4.7";
+          const CURRENT_VERSION = "2.4.8";
           const i18n = {
               en: {
                   title: "Nahan Gateway", pass_ph: "Master Key", login_btn: "Authenticate", err_pass: "Access Denied", missing_db: "⚠️ IOT_DB namespace missing! Settings won't save.",
@@ -3211,14 +3532,15 @@ function getDashboardUI(hasDB) {
                   stat_total_subscribers: "Total Subscribers", stat_active_paused: "Active / Paused", stat_cumulative_traffic: "Cumulative Traffic",
                   sub_directory_title: "Subscriber Directory", sub_directory_desc: "Search, modify bounds, toggle traffic limits or clear billing sessions.", user_search_placeholder: "🔍 Find by Name or UUID...",
                   v_pop_title: "Release Notice", v_pop_whatsnew: "What's New", v_pop_headline: "New Features & Improvements",
-                  v_pop_b1_title: "Redesign Panel",
-                  v_pop_b2_title: "Add Request to GB in Users Tab",
-                  v_pop_b3_title: "Add New Sub Output Type",
-                  v_pop_b4_title: "Add User Sub Detail Page",
-                  v_pop_b5_title: "Add More Features in Users Tab",
-                  v_pop_b6_title: "Add Custom URL",
-                  v_pop_b7_title: "Panel Downgrade",
-                  v_pop_btn: "Got it!"
+                  v_pop_b1_title: "ALL-in-ONE URL and removed alph, beta, gamma",
+                  v_pop_b2_title: "Add ability to set separate proxy-ip for each user",
+                  v_pop_b3_title: "Fix clash and singbox subscription",
+                  v_pop_b4_title: "Add used gb and remaining date to subscription",
+                  v_pop_b5_title: "General bug fixes and system improvements",
+                  v_pop_b6_title: "",
+                  v_pop_b7_title: "",
+                  v_pop_btn: "Got it!",
+                  changelog_title: "Release Notes & Changelog:"
               },
               fa: {
                   title: "دروازه نهان", pass_ph: "کلید اصلی", login_btn: "ورود به سیستم", err_pass: "دسترسی مسدود شد", missing_db: "⚠️ فضای پایگاه داده یافت نشد! تنظیمات ذخیره نمی‌شوند.",
@@ -3250,14 +3572,15 @@ function getDashboardUI(hasDB) {
                   stat_total_subscribers: "کل مشترکین", stat_active_paused: "فعال / متوقف شده", stat_cumulative_traffic: "ترافیک کل انباشته",
                   sub_directory_title: "فهرست مشترکین", sub_directory_desc: "جستجو، اصلاح محدودیت‌ها، تغییر محدودیت‌های ترافیک یا پاک کردن جلسات حسابداری.", user_search_placeholder: "🔍 جستجو بر اساس نام یا شناسه...",
                   v_pop_title: "اطلاعیه تعمیرات", v_pop_whatsnew: "ویژگی‌های جدید", v_pop_headline: "امکانات جدید و بهبودها",
-                  v_pop_b1_title: "طراحی مجدد پنل",
-                  v_pop_b2_title: "افزودن امکان تبدیل درخواست به گیگابایت در تب کاربران",
-                  v_pop_b3_title: "افزودن نوع خروجی جدید برای اشتراک (ساب)",
-                  v_pop_b4_title: "افزودن صفحه جزئیات اشتراک کاربر",
-                  v_pop_b5_title: "افزودن قابلیت‌های بیشتر در تب کاربران",
-                  v_pop_b6_title: "افزودن آدرس سفارشی (کاستوم)",
-                  v_pop_b7_title: "دانگرید پنل",
-                  v_pop_btn: "متوجه شدم!"
+                  v_pop_b1_title: "تک آدرس شدن (ALL-in-ONE URL) و حذف آلفا، بتا، گاما",
+                  v_pop_b2_title: "امکان تنظیم آی‌پی پروکسی (proxy-ip) مجزا برای هر کاربر",
+                  v_pop_b3_title: "رفع مشکل لینک اشتراک کلش و سینگ‌باکس",
+                  v_pop_b4_title: "اضافه شدن نمایش حجم مصرفی و تاریخ انقضا در توضیحات اشتراک",
+                  v_pop_b5_title: "رفع باگ‌های جزئی و بهبود عملکرد سیستم",
+                  v_pop_b6_title: "",
+                  v_pop_b7_title: "",
+                  v_pop_btn: "متوجه شدم!",
+                  changelog_title: "گزارش تغییرات و توضیحات نسخه جدید:"
               }
           };
   
@@ -3539,6 +3862,23 @@ function getDashboardUI(hasDB) {
               }
           }
   
+          function togglePortCheckbox(val, checked) {
+              const sel = document.getElementById('cfg-port');
+              const opt = Array.from(sel.options).find(o => o.value === val);
+              if (opt) {
+                  opt.selected = checked;
+                  sel.dispatchEvent(new Event('change'));
+              }
+          }
+          function syncCheckboxesFromSelect() {
+              const sel = document.getElementById('cfg-port');
+              const ports = Array.from(sel.selectedOptions).map(o => o.value);
+              const checkboxes = document.querySelectorAll('#port-checkboxes-container input[type="checkbox"]');
+              checkboxes.forEach(cb => {
+                  cb.checked = ports.includes(cb.value);
+              });
+          }
+
           async function doLogin(silent = false) {
               const btn = document.querySelector('button[onclick="doLogin()"]');
               const origText = btn.innerText; 
@@ -3564,6 +3904,7 @@ function getDashboardUI(hasDB) {
                       document.getElementById('cfg-proto').value = conf.mode || 'alpha';
                       let pList = (conf.socketPorts || conf.socketPort || '443').split(',');
                       Array.from(document.getElementById('cfg-port').options).forEach(o => o.selected = pList.includes(o.value));
+                      syncCheckboxesFromSelect();
                       document.getElementById('cfg-uuid').value = conf.deviceId || '';
                       document.getElementById('cfg-path').value = conf.apiRoute || '';
                       document.getElementById('cfg-pass').value = conf.masterKey || '';
@@ -3622,32 +3963,15 @@ function getDashboardUI(hasDB) {
                                       <div class="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-darkborder px-3 py-2 rounded-lg text-xs font-mono text-slate-500">\${p.id}</div>
                                   </div>
                                   <div class="relative">
-                                      <label class="block text-[10px] font-semibold text-emerald-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Format Alpha Sync URL</label>
+                                      <label class="block text-[10px] font-semibold text-emerald-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Universal Sync URL</label>
                                       <input type="text" id="sync-\${p.id}" readonly value="\${p.sync}" class="w-full bg-slate-50 dark:bg-darkbg border border-slate-200 dark:border-darkborder px-4 py-2.5 rounded-xl text-xs outline-none font-mono text-slate-600 dark:text-slate-400 truncate pe-12">
                                       <button onclick="copyData('sync-\${p.id}')" class="absolute bottom-1 end-1 text-primary p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"><svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button>
                                   </div>
 
-                                  <div class="relative">
-                                      <label class="block text-[10px] font-semibold text-amber-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>Format Beta Sync URL</label>
-                                      <input type="text" id="sync-beta-\${p.id}" readonly value="\${p.sync}\${p.sync.includes('?') ? '&flag=b' : '?flag=b'}" class="w-full bg-slate-50 dark:bg-darkbg border border-slate-200 dark:border-darkborder px-4 py-2.5 rounded-xl text-xs outline-none font-mono text-slate-600 dark:text-slate-400 truncate pe-12">
-                                      <button onclick="copyData('sync-beta-\${p.id}')" class="absolute bottom-1 end-1 text-primary p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"><svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button>
-                                  </div>
-
-                                  <div class="relative">
-                                      <label class="block text-[10px] font-semibold text-violet-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-violet-500"></span>Format Gamma Sync URL</label>
-                                      <input type="text" id="sync-gamma-\${p.id}" readonly value="\${p.sync}\${p.sync.includes('?') ? '&flag=c' : '?flag=c'}" class="w-full bg-slate-50 dark:bg-darkbg border border-slate-200 dark:border-darkborder px-4 py-2.5 rounded-xl text-xs outline-none font-mono text-slate-600 dark:text-slate-400 truncate pe-12">
-                                      <button onclick="copyData('sync-gamma-\${p.id}')" class="absolute bottom-1 end-1 text-primary p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"><svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button>
-                                  </div>
-
-                                  <div class="grid grid-cols-3 gap-2 mt-2">
-                                      <button onclick="showQR('\${p.name} - Format A', document.getElementById('sync-\${p.id}').value)" class="flex flex-col items-center justify-center p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-darkborder rounded-xl transition-all gap-1 text-[10px] font-bold text-slate-600 dark:text-slate-400">
-                                          <span>Format A QR</span>
-                                      </button>
-                                      <button onclick="showQR('\${p.name} - Format B', document.getElementById('sync-beta-\${p.id}').value)" class="flex flex-col items-center justify-center p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-darkborder rounded-xl transition-all gap-1 text-[10px] font-bold text-slate-600 dark:text-slate-400">
-                                          <span>Format B QR</span>
-                                      </button>
-                                      <button onclick="showQR('\${p.name} - Format C', document.getElementById('sync-gamma-\${p.id}').value)" class="flex flex-col items-center justify-center p-2 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-darkborder rounded-xl transition-all gap-1 text-[10px] font-bold text-slate-600 dark:text-slate-400">
-                                          <span>Format C QR</span>
+                                  <div class="mt-2">
+                                      <button onclick="showQR('\${p.name}', document.getElementById('sync-\${p.id}').value)" class="w-full flex items-center justify-center p-2.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-darkborder rounded-xl transition-all gap-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                                          <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m0 11v1m5-7h1m-13 0h1m2-5a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V6a2 2 0 00-2-2h-8zM9 9h1m0 0v1m2-1h1m0 0v1"></path></svg>
+                                          <span>Show QR Code</span>
                                       </button>
                                   </div>
                               </div>
@@ -3854,9 +4178,22 @@ function getDashboardUI(hasDB) {
                       <td class="px-4 py-4 font-bold text-slate-700 dark:text-slate-300">\${u.name} \${u.isPaused ? '⏸️' : (isExp ? '🔴' : '🟢')}</td>
                       <td class="px-4 py-4 font-mono text-xs text-slate-500 select-all">\${u.id}</td>
                       <td class="px-4 py-4 text-slate-600 dark:text-slate-400 font-mono">
-                          <div class="flex flex-col gap-1">
-                              <span class="font-bold text-xs flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>\${totalLabel} \${userReqs} \${rLabel} (\${(userReqs/6000).toFixed(2)} GB) / \${u.limitTotalReq ? (u.limitTotalReq + ' ' + rLabel + ' (' + (u.limitTotalReq/6000).toFixed(2) + ' GB)') : \`\${unlimitedTxt}\`} (\${perT})</span>
-                              <span class="text-[11px] opacity-70 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>\${dailyLabel} \${userDReqs} \${rLabel} (\dots) / \${u.limitDailyReq ? (u.limitDailyReq + ' ' + rLabel + ' (' + (u.limitDailyReq/6000).toFixed(2) + ' GB)') : \`\${unlimitedTxt}\`} (\${perD})</span>
+                          <div class="flex flex-col gap-1.5">
+                              <span class="font-bold text-xs flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>\${totalLabel} \${userReqs} \${rLabel} (\${(userReqs/6050).toFixed(2)} GB) / \${u.limitTotalReq ? (u.limitTotalReq + ' ' + rLabel + ' (' + (u.limitTotalReq/6000).toFixed(2) + ' GB)') : \`\${unlimitedTxt}\`} (\${perT})</span>
+                              
+                              \${u.limitTotalReq ? \`
+                              <div class="w-full bg-slate-100 dark:bg-slate-800/80 h-2 rounded-full overflow-hidden mt-0.5 mb-1">
+                                  <div class="bg-gradient-to-r \${parseFloat(perT) > 85 ? 'from-red-500 to-rose-600' : parseFloat(perT) > 60 ? 'from-amber-500 to-orange-500' : 'from-emerald-500 to-teal-500'} h-full rounded-full transition-all duration-500" style="width: \${perT}"></div>
+                              </div>
+                              \` : ''}
+
+                              <span class="text-[11px] opacity-70 flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>\${dailyLabel} \${userDReqs} \${rLabel} (\${(userDReqs/6050).toFixed(2)} GB) / \${u.limitDailyReq ? (u.limitDailyReq + ' ' + rLabel + ' (' + (u.limitDailyReq/6050).toFixed(2) + ' GB)') : \`\${unlimitedTxt}\`} (\${perD})</span>
+                              
+                              \${u.limitDailyReq ? \`
+                              <div class="w-full bg-slate-100 dark:bg-slate-800/80 h-1.5 rounded-full overflow-hidden mt-0.5">
+                                  <div class="bg-indigo-500 h-full rounded-full transition-all duration-500" style="width: \${perD}"></div>
+                              </div>
+                              \` : ''}
                           </div>
                       </td>
                       <td class="px-4 py-4 text-slate-600 dark:text-slate-400">\${expTxt}</td>
@@ -3924,6 +4261,7 @@ function getDashboardUI(hasDB) {
               let tReq = document.getElementById('add-user-total-reqs').value;
               let dReq = document.getElementById('add-user-daily-reqs').value;
               let days = document.getElementById('add-user-days').value;
+              const proxyIp = document.getElementById('add-user-proxy-ip').value || null;
               
               if(!name) {
                   const enterNameMsg = lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name';
@@ -3940,14 +4278,15 @@ function getDashboardUI(hasDB) {
               let newId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
                   .map((b,i) => (i===4||i===6||i===8||i===10?'-':'') + b.toString(16).padStart(2,'0')).join('');
               
-              const u = {
-                  id: newId,
-                  name: name,
-                  limitTotalReq: tReq,
-                  limitDailyReq: dReq,
-                  expiryMs: days ? Date.now() + days*86400000 : null,
-                  createdAt: Date.now()
-              };
+               const u = {
+                   id: newId,
+                   name: name,
+                   limitTotalReq: tReq,
+                   limitDailyReq: dReq,
+                   expiryMs: days ? Date.now() + days*86400000 : null,
+                   proxyIp: proxyIp,
+                   createdAt: Date.now()
+               };
               
               window.nahanConfig.users.push(u);
               document.getElementById('modal-add-user').classList.add('hidden');
@@ -3955,6 +4294,7 @@ function getDashboardUI(hasDB) {
               document.getElementById('add-user-total-reqs').value = '';
               document.getElementById('add-user-daily-reqs').value = '';
               document.getElementById('add-user-days').value = '';
+              document.getElementById('add-user-proxy-ip').value = '';
               
               renderUsersTable();
               doSaveDirectly();
@@ -3969,6 +4309,7 @@ function getDashboardUI(hasDB) {
               document.getElementById('edit-user-name').value = u.name;
               document.getElementById('edit-user-total-reqs').value = u.limitTotalReq || '';
               document.getElementById('edit-user-daily-reqs').value = u.limitDailyReq || '';
+              document.getElementById('edit-user-proxy-ip').value = u.proxyIp || '';
               
               let daysLeft = '';
               if(u.expiryMs) {
@@ -3986,6 +4327,7 @@ function getDashboardUI(hasDB) {
               let tReq = document.getElementById('edit-user-total-reqs').value;
               let dReq = document.getElementById('edit-user-daily-reqs').value;
               let days = document.getElementById('edit-user-days').value;
+              const proxyIp = document.getElementById('edit-user-proxy-ip').value || null;
               
               if(!name) {
                   const enterNameMsg = lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name';
@@ -4004,6 +4346,7 @@ function getDashboardUI(hasDB) {
               u.limitTotalReq = tReq;
               u.limitDailyReq = dReq;
               u.expiryMs = days ? Date.now() + days*86400000 : null;
+              u.proxyIp = proxyIp;
               
               document.getElementById('modal-edit-user').classList.add('hidden');
               renderUsersTable();
@@ -4082,7 +4425,98 @@ function getDashboardUI(hasDB) {
               }
           }
           
-          function showUpdateBanner(repo, version) {
+          function parseMarkdown(md) {
+              if (!md) return '';
+              let lines = md.split(/\\r?\\n/);
+              let htmlLines = [];
+              let inCodeBlock = false;
+              let codeContent = [];
+
+              for (let line of lines) {
+                  let trimmed = line.trim();
+
+                  // Toggle code block
+                  if (trimmed.startsWith('\\x60\\x60\\x60')) {
+                      if (inCodeBlock) {
+                          // Close code block
+                          let codeText = codeContent.join('\\n')
+                              .replace(/&/g, "&amp;")
+                              .replace(/</g, "&lt;")
+                              .replace(/>/g, "&gt;");
+                          htmlLines.push('<pre class="bg-slate-900/90 text-slate-100 p-3 rounded-xl my-2 font-mono text-[10px] overflow-x-auto border border-slate-800 max-h-40">' + codeText + '</pre>');
+                          codeContent = [];
+                          inCodeBlock = false;
+                      } else {
+                          inCodeBlock = true;
+                      }
+                      continue;
+                  }
+
+                  if (inCodeBlock) {
+                      codeContent.push(line);
+                      continue;
+                  }
+
+                  if (!trimmed) {
+                      continue; 
+                  }
+
+                  // Process headers
+                  if (trimmed.startsWith('### ')) {
+                      let text = trimmed.slice(4);
+                      htmlLines.push('<h5 class="text-sm font-bold text-amber-800 dark:text-amber-400 mt-3 mb-1">' + parseInlineMarkdown(text) + '</h5>');
+                      continue;
+                  }
+                  if (trimmed.startsWith('## ')) {
+                      let text = trimmed.slice(3);
+                      htmlLines.push('<h4 class="text-sm font-extrabold text-amber-800 dark:text-amber-400 mt-4 mb-2">' + parseInlineMarkdown(text) + '</h4>');
+                      continue;
+                  }
+                  if (trimmed.startsWith('# ')) {
+                      let text = trimmed.slice(2);
+                      htmlLines.push('<h3 class="text-base font-black text-amber-900 dark:text-amber-300 mt-4 mb-2">' + parseInlineMarkdown(text) + '</h3>');
+                      continue;
+                  }
+
+                  // Process lists
+                  let listMatch = line.match(/^(\\s*)([-*+])\\s+(.*)$/);
+                  if (listMatch) {
+                      let text = listMatch[3];
+                      htmlLines.push('<div class="flex items-start gap-2 my-1"><span class="text-amber-500 mt-0.5">▪</span><span class="flex-1">' + parseInlineMarkdown(text) + '</span></div>');
+                      continue;
+                  }
+
+                  // Standard line
+                  htmlLines.push('<p class="my-1">' + parseInlineMarkdown(line) + '</p>');
+              }
+
+              // Guard for unclosed code block
+              if (inCodeBlock && codeContent.length > 0) {
+                  let codeText = codeContent.join('\\n')
+                      .replace(/&/g, "&amp;")
+                      .replace(/</g, "&lt;")
+                      .replace(/>/g, "&gt;");
+                  htmlLines.push('<pre class="bg-slate-900/90 text-slate-100 p-3 rounded-xl my-2 font-mono text-[10px] overflow-x-auto border border-slate-800 max-h-40">' + codeText + '</pre>');
+              }
+
+              return htmlLines.join('\\n');
+
+              function parseInlineMarkdown(text) {
+                  let safe = text
+                      .replace(/&/g, "&amp;")
+                      .replace(/</g, "&lt;")
+                      .replace(/>/g, "&gt;");
+                  // Bold
+                  safe = safe.replace(/\\*\\*(.*?)\\*\\*/g, '<strong class="font-extrabold text-slate-800 dark:text-slate-200">\$1</strong>');
+                  // Italic
+                  safe = safe.replace(/\\*(.*?)\\*/g, '<em class="italic">\$1</em>');
+                  // Inline code
+                  safe = safe.replace(/[\\x60](.*?)[\\x60]/g, '<code class="bg-amber-500/10 dark:bg-slate-800 px-1.5 py-0.5 rounded text-rose-500 font-mono text-[11px]">\$1</code>');
+                  return safe;
+              }
+          }
+
+          async function showUpdateBanner(repo, version) {
               const banner = document.getElementById('update-alert-banner');
               if (!banner) return;
               
@@ -4094,6 +4528,69 @@ function getDashboardUI(hasDB) {
               document.getElementById('update-alert-btn').href = 'https://github.com/' + repo;
               banner.classList.remove('hidden');
               banner.classList.add('flex');
+              
+              const changelogArea = document.getElementById('update-changelog-area');
+              const changelogContent = document.getElementById('update-changelog-content');
+              if (changelogArea && changelogContent) {
+                  changelogArea.classList.remove('hidden');
+                  changelogContent.innerHTML = lang === 'fa' 
+                      ? '<p class="animate-pulse">در حال دریافت گزارش تغییرات...</p>' 
+                      : '<p class="animate-pulse">Loading changelog...</p>';
+                      
+                  try {
+                      let changelogText = '';
+                      try {
+                          const res = await fetch('https://api.github.com/repos/' + repo + '/releases/tags/v' + version);
+                          if (res.ok) {
+                              const rel = await res.json();
+                              if (rel && rel.body) {
+                                  changelogText = rel.body;
+                              }
+                          } else {
+                              const resNoV = await fetch('https://api.github.com/repos/' + repo + '/releases/tags/' + version);
+                              if (resNoV.ok) {
+                                  const relNoV = await resNoV.json();
+                                  if (relNoV && relNoV.body) {
+                                      changelogText = relNoV.body;
+                                  }
+                              }
+                          }
+                      } catch(e) {}
+                      
+                      if (!changelogText) {
+                          try {
+                              const resLatest = await fetch('https://api.github.com/repos/' + repo + '/releases/latest');
+                              if (resLatest.ok) {
+                                  const relLatest = await resLatest.json();
+                                  if (relLatest && relLatest.body) {
+                                      changelogText = relLatest.body;
+                                  }
+                              }
+                          } catch(e) {}
+                      }
+                      
+                      if (!changelogText) {
+                          try {
+                              const resFile = await fetch('https://raw.githubusercontent.com/' + repo + '/main/CHANGELOG.md');
+                              if (resFile.ok) {
+                                  changelogText = await resFile.text();
+                              }
+                          } catch(e) {}
+                      }
+                      
+                      if (changelogText) {
+                          changelogContent.innerHTML = parseMarkdown(changelogText);
+                      } else {
+                          changelogContent.innerHTML = lang === 'fa' 
+                              ? '<p class="text-slate-500">گزارش تغییراتی برای این نسخه یافت نشد.</p>' 
+                              : '<p class="text-slate-500">No changelog registered for this version.</p>';
+                      }
+                  } catch(err) {
+                      changelogContent.innerHTML = lang === 'fa' 
+                          ? '<p class="text-rose-500">خطا در دریافت گزارش تغییرات.</p>' 
+                          : '<p class="text-rose-500">Failed to load changelog.</p>';
+                  }
+              }
           }
           
           function dismissUpdate() {
