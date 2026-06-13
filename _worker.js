@@ -3813,7 +3813,7 @@ function getDashboardUI(hasDB) {
 
                       <!-- INFO VIEW -->
                       <div id="view-info" class="space-y-6 block">
-                          <div id="dyn-profiles-container" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                          <div id="dyn-profiles-container" class="columns-1 md:columns-2 gap-4"></div>
                       </div>
 
                       <!-- NETWORK/METRICS VIEW -->
@@ -3840,7 +3840,11 @@ function getDashboardUI(hasDB) {
                                   <p class="text-xs uppercase font-bold text-slate-400 mb-1" data-i18n="stat_loc">Data Region</p>
                                   <p id="net-loc" class="text-lg font-bold truncate">...</p>
                               </div>
-  
+                              <div class="bg-white dark:bg-darkcard p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-darkborder relative overflow-hidden group sm:col-span-2 lg:col-span-1">
+                                  <svg class="w-8 h-8 text-blue-500 mb-4"  width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-clock10-icon lucide-clock-10"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l-4-2"/></svg>
+                                  <p class="text-xs uppercase font-bold text-slate-400 mb-1" data-i18n="stat_datetime">Date Time</p>
+                                  <p id="net-datetime" class="text-lg font-bold truncate text-center"  dir="rtl">...</p>
+                              </div>
                               <!-- Diagnostics Segment -->
                               <div class="bg-white dark:bg-darkcard p-6 rounded-3xl shadow-sm border border-slate-200 dark:border-darkborder relative overflow-hidden group sm:col-span-2 lg:col-span-3">
                                   <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -4246,7 +4250,7 @@ function getDashboardUI(hasDB) {
                                           <option value="auto-disabled" data-i18n="filter_auto_disabled">Auto-Disabled</option>
                                       </select>
                                       <input type="text" id="user-search-input" onkeyup="renderUsersTable()" placeholder="🔍 Find by Name or UUID..." data-i18n="user_search_placeholder" class="bg-slate-50 dark:bg-darkbg border border-slate-200 dark:border-darkborder px-4 py-2.5 rounded-xl text-xs outline-none font-sans text-slate-600 dark:text-slate-400 focus:border-primary">
-                                      <button onclick="document.getElementById('modal-add-user').classList.remove('hidden')" class="px-4 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-xs font-bold transition-colors shadow-sm" data-i18n="btn_add_user">+ Add New User</button>
+                                      <button onclick="document.getElementById('modal-add-user').classList.remove('hidden'); buildPortCheckboxes('add-user-ports-wrap', null); buildModeCheckboxes('add-user-mode-wrap', null);" class="px-4 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-xs font-bold transition-colors shadow-sm" data-i18n="btn_add_user">+ Add New User</button>
                                   </div>
                               </div>
                               <div class="overflow-x-auto">
@@ -4289,21 +4293,19 @@ function getDashboardUI(hasDB) {
                                       <input type="number" id="add-user-days" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none">
                                   </div>
                                   <div>
-                                      <label class="block text-xs font-bold text-slate-500 mb-1">User Proxy IP(s) (Optional - overrides global Clean IP, comma/newline separated)</label>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ipproxy">User Proxy IP(s) (Optional - overrides global Clean IP, comma/newline separated)</label>
                                       <input type="text" id="add-user-proxy-ip" placeholder="e.g. 104.20.0.1, proxyip.com" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
                                   </div>
                                   <div>
-                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_Protocol">Protocol Mode (Leave empty to use global setting)</label>
-                                      <select id="add-user-mode" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm appearance-none">
-                                          <option value="">— Use Global Setting —</option>
-                                          <option value="alpha">Alpha Only (V-Core / VLESS)</option>
-                                          <option value="beta">Beta Only (T-Core / Trojan)</option>
-                                          <option value="both">Both (VLESS + Trojan)</option>
-                                      </select>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_Protocol">Protocol Mode</label>
+                                      <div id="add-user-mode-wrap" class="flex gap-3 mt-1">
+                                          <label class="flex items-center gap-1.5 text-sm cursor-pointer"><input type="checkbox" value="alpha" class="add-mode-cb accent-primary"> <span>Alpha (VLESS)</span></label>
+                                          <label class="flex items-center gap-1.5 text-sm cursor-pointer"><input type="checkbox" value="beta" class="add-mode-cb accent-primary"> <span>Beta (Trojan)</span></label>
+                                      </div>
                                   </div>
                                   <div>
-                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ports">Custom Ports (Optional - overrides global ports, comma separated e.g. 443,80)</label>
-                                      <input type="text" id="add-user-ports" placeholder="e.g. 443,80,2053" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ports">Ports</label>
+                                      <div id="add-user-ports-wrap" class="flex flex-wrap gap-2 mt-1"></div>
                                   </div>
                                   <div>
                                       <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_max_config">Max Configs (Optional - limit total generated configs, e.g. 4)</label>
@@ -4344,17 +4346,15 @@ function getDashboardUI(hasDB) {
                                       <input type="text" id="edit-user-proxy-ip" placeholder="e.g. 104.20.0.1, proxyip.com" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
                                   </div>
                                   <div>
-                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_Protocol">Protocol Mode (Leave empty to use global setting)</label>
-                                      <select id="edit-user-mode" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm appearance-none">
-                                          <option value="">— Use Global Setting —</option>
-                                          <option value="alpha">Alpha Only (V-Core / VLESS)</option>
-                                          <option value="beta">Beta Only (T-Core / Trojan)</option>
-                                          <option value="both">Both (VLESS + Trojan)</option>
-                                      </select>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_Protocol">Protocol Mode</label>
+                                      <div id="edit-user-mode-wrap" class="flex gap-3 mt-1">
+                                          <label class="flex items-center gap-1.5 text-sm cursor-pointer"><input type="checkbox" value="alpha" class="edit-mode-cb accent-primary"> <span>Alpha (VLESS)</span></label>
+                                          <label class="flex items-center gap-1.5 text-sm cursor-pointer"><input type="checkbox" value="beta" class="edit-mode-cb accent-primary"> <span>Beta (Trojan)</span></label>
+                                      </div>
                                   </div>
                                   <div>
-                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ports">Custom Ports (Optional - overrides global ports, comma separated e.g. 443,80)</label>
-                                      <input type="text" id="edit-user-ports" placeholder="e.g. 443,80,2053" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ports">Ports</label>
+                                      <div id="edit-user-ports-wrap" class="flex flex-wrap gap-2 mt-1"></div>
                                   </div>
                                   <div>
                                       <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_max_config">Max Configs (Optional - limit total generated configs, e.g. 4)</label>
@@ -4512,6 +4512,8 @@ function getDashboardUI(hasDB) {
                   lbl_u_ports:"Custom Ports (Optional - overrides global ports, comma separated e.g. 443,80",
                   lbl_u_max_config:"Max Configs",
                   login_password:"Password",
+                  lbl_u_ipproxy:"User Proxy IP(s) (Optional - overrides global Clean IP, comma/newline separated)",
+                  lbl_custom_panel_url:"Custom Panel URL / Subscription Domain",
                   v_pop_title: "Release Notice", v_pop_whatsnew: "What's New", v_pop_headline: "New Features & Improvements",
                   v_pop_btn: "Got it!",
                   changelog_title: "Release Notes & Changelog:",
@@ -4552,6 +4554,7 @@ function getDashboardUI(hasDB) {
                   lbl_u_ports:"نوع پورت",
                   lbl_u_max_config:"حداکثر تعداد کانفیگ",
                   login_password:"رمز ورود",
+                  lbl_u_ipproxy:"آی‌پی(های) پروکسی کاربر (اختیاری - آی‌پی پاک سراسری را نادیده می‌گیرد، با کاما/خط جدید از هم جدا می‌شوند)",
                   v_pop_title: "اطلاعیه تعمیرات", v_pop_whatsnew: "ویژگی‌های جدید", v_pop_headline: "امکانات جدید و بهبودها",
                   v_pop_btn: "متوجه شدم!",
                   changelog_title: "گزارش تغییرات و توضیحات نسخه جدید:",
@@ -4992,7 +4995,6 @@ function getDashboardUI(hasDB) {
                       document.getElementById('net-ip').textContent = data.network.ip;
                       document.getElementById('net-colo').textContent = data.network.colo;
                       document.getElementById('net-loc').textContent = data.network.loc;
-                      
                       const conf = data.config;
                       document.getElementById('cfg-proto').value = conf.mode || 'alpha';
                       let pList = (conf.socketPorts || conf.socketPort || '443').split(',');
@@ -5037,42 +5039,72 @@ function getDashboardUI(hasDB) {
                           const el = document.getElementById(id);
                           if(el) el.addEventListener('change', updateUI);
                       });
-                      
-                      const pCont = document.getElementById('dyn-profiles-container');
-                      pCont.innerHTML = '';
-                      data.profiles.forEach(p => {
-                          const isDef = p.name === 'Default';
-                          let html = \`<div class="bg-white dark:bg-darkcard rounded-3xl p-5 md:p-6 shadow-sm border border-slate-200 dark:border-darkborder relative overflow-hidden">
-                              <div class="absolute top-0 end-0 w-32 h-32 bg-primary/5 rounded-bl-[100px] -z-10"></div>
-                              <div class="flex items-center justify-between mb-4">
-                                  <h3 class="text-lg font-bold text-slate-800 dark:text-white flex items-center">
-                                      <svg class="w-5 h-5 me-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
-                                      \${p.name}
-                                  </h3>
-                                  \${isDef ? '<span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded font-bold uppercase">Master</span>' : ''}
-                              </div>
-                              <div class="space-y-3">
-                                  <div> 
-                                      <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">UUID</label>
-                                      <div class="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-darkborder px-3 py-2 rounded-lg text-xs font-mono text-slate-500">\${p.id}</div>
-                                  </div>
-                                  <div class="relative">
-                                      <label class="block text-[10px] font-semibold text-emerald-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Universal Sync URL</label>
-                                      <input type="text" id="sync-\${p.id}" readonly value="\${p.sync}" class="w-full bg-slate-50 dark:bg-darkbg border border-slate-200 dark:border-darkborder px-4 py-2.5 rounded-xl text-xs outline-none font-mono text-slate-600 dark:text-slate-400 truncate pe-12">
-                                      <button onclick="copyData('sync-\${p.id}')" class="absolute bottom-1 end-1 text-primary p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"><svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button>
-                                  </div>
 
-                                  <div class="mt-2">
-                                      <button onclick="showQR('\${p.name}', document.getElementById('sync-\${p.id}').value)" class="w-full flex items-center justify-center p-2.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-darkborder rounded-xl transition-all gap-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-400">
-                                          <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m0 11v1m5-7h1m-13 0h1m2-5a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V6a2 2 0 00-2-2h-8zM9 9h1m0 0v1m2-1h1m0 0v1"></path></svg>
-                                          <span>Show QR Code</span>
-                                      </button>
-                                  </div>
-                              </div>
-                          </div>\`;
-                          pCont.innerHTML += html;
-                      });
                       
+            
+                     window.toggleAccordion = function(btn) 
+                        {
+                            const card = btn.closest('[data-accordion]');
+                            const content = card.querySelector('[data-accordion-content]');
+                            const icon = btn.querySelector('.accordion-icon');
+                            const isOpen = content.style.maxHeight && content.style.maxHeight !== '0px';
+
+                            if (isOpen) {
+                                content.style.maxHeight = '0';
+                                icon.style.transform = 'rotate(0deg)';
+                            } else {
+                                content.style.maxHeight = content.scrollHeight + 'px';
+                                icon.style.transform = 'rotate(180deg)';
+                            }
+                        }
+
+                window.handleCopy = function handleCopy(btn) {
+                    copyData('sync-' + btn.dataset.id);
+                }
+                window.handleQR = function handleQR(btn) {
+                    showQR(btn.dataset.name, document.getElementById('sync-' + btn.dataset.id).value);
+                }
+                const pCont = document.getElementById('dyn-profiles-container');
+                pCont.innerHTML = '';
+                data.profiles.forEach(p => {
+                            const isDef = p.name === 'Default';
+                            let html = \`<div class="bg-white dark:bg-darkcard rounded-3xl shadow-sm border border-slate-200 dark:border-darkborder relative mb-4 break-inside-avoid inline-block w-full" data-accordion>
+    <div class="absolute top-0 end-0 w-32 h-32 bg-primary/5 rounded-bl-[100px] -z-10"></div>
+    <button onclick="toggleAccordion(this)" class="w-full flex items-center justify-between p-5 md:p-6">
+        <h3 class="text-lg font-bold text-slate-800 dark:text-white flex items-center">
+            <svg class="w-5 h-5 me-2 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+            \${p.name}
+        </h3>
+        <div class="flex items-center gap-2">
+            \${isDef ? '<span class="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded font-bold uppercase">Master</span>' : ''}
+            <svg class="w-4 h-4 text-slate-400 accordion-icon transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+        </div>
+    </button>
+    <div class="transition-all duration-300" style="max-height:0;overflow:hidden;" data-accordion-content>
+        <div class="space-y-3 px-5 md:px-6 pb-5 md:pb-6">
+            <div>
+                <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">UUID</label>
+                <div class="bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-darkborder px-3 py-2 rounded-lg text-xs font-mono text-slate-500">\${p.id}</div>
+            </div>
+            <div class="relative">
+                <label class="block text-[10px] font-semibold text-emerald-500 uppercase tracking-wider mb-1 flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Universal Sync URL</label>
+                <input type="text" id="sync-\${p.id}" readonly value="\${p.sync}" class="w-full bg-slate-50 dark:bg-darkbg border border-slate-200 dark:border-darkborder px-4 py-2.5 rounded-xl text-xs outline-none font-mono text-slate-600 dark:text-slate-400 truncate pe-12">
+                <button data-id="\${p.id}" onclick="handleCopy(this)" class="absolute bottom-1 end-1 text-primary p-1.5 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md"><svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg></button>
+            </div>
+            <div class="mt-2">
+                <button data-id="\${p.id}" data-name="\${p.name}" onclick="handleQR(this)" class="w-full flex items-center justify-center p-2.5 bg-slate-50 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 border border-slate-200 dark:border-darkborder rounded-xl transition-all gap-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-400">
+                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m0 11v1m5-7h1m-13 0h1m2-5a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V6a2 2 0 00-2-2h-8zM9 9h1m0 0v1m2-1h1m0 0v1"></path></svg>
+                    <span>Show QR Code</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>\`;
+                         pCont.insertAdjacentHTML('beforeend', html);
+                      });
+
+
+
                       // Inject usage metrics table
                       const usageCont = document.getElementById('usage-metrics-container');
                       if(usageCont && data.usage) {
@@ -5422,30 +5454,82 @@ function getDashboardUI(hasDB) {
               }
           }
 
+          function getGlobalPorts() {
+              return (window.nahanConfig && window.nahanConfig.socketPorts)
+                  ? window.nahanConfig.socketPorts.split(',').map(s=>s.trim()).filter(Boolean)
+                  : ['443'];
+          }
+
+          function getGlobalMode() {
+              return (window.nahanConfig && window.nahanConfig.mode) ? window.nahanConfig.mode : 'alpha';
+          }
+
+          function buildPortCheckboxes(wrapId, selectedPorts) {
+              const wrap = document.getElementById(wrapId);
+              if (!wrap) return;
+              const globalPorts = getGlobalPorts();
+              const sel = selectedPorts ? selectedPorts.split(',').map(s=>s.trim()) : ['443'];
+              wrap.innerHTML = globalPorts.map(function(p) {
+                  return '<label class="flex items-center gap-1.5 text-sm cursor-pointer"><input type="checkbox" value="' + p + '" class="' + wrapId + '-port-cb accent-primary"' + (sel.includes(p) ? ' checked' : '') + '><span>' + p + '</span></label>';
+              }).join('');
+          }
+
+          function buildModeCheckboxes(wrapId, userMode) {
+              const globalMode = getGlobalMode();
+              const alphaAllowed = globalMode === 'alpha' || globalMode === 'both';
+              const betaAllowed = globalMode === 'beta' || globalMode === 'both';
+              const selAlpha = userMode === 'alpha' || userMode === 'both' || (!userMode && alphaAllowed);
+              const selBeta = userMode === 'beta' || userMode === 'both' || (!userMode && betaAllowed);
+              const wrap = document.getElementById(wrapId);
+              if (!wrap) return;
+              wrap.querySelectorAll('input[type=checkbox]').forEach(cb => {
+                  if (cb.value === 'alpha') { cb.disabled = !alphaAllowed; cb.checked = selAlpha && alphaAllowed; cb.closest			('label').style.opacity = alphaAllowed ? '1' : '0.35'; }
+                  if (cb.value === 'beta')  { cb.disabled = !betaAllowed;  cb.checked = selBeta && betaAllowed;  cb.closest			('label').style.opacity = betaAllowed  ? '1' : '0.35'; }
+              });
+          }
+
+          function readModeFromCheckboxes(cbClass) {
+             const cbs = [...document.querySelectorAll('.' + cbClass + ':checked')].map(c=>c.value);
+              if (cbs.includes('alpha') && cbs.includes('beta')) return 'both';
+              if (cbs.includes('alpha')) return 'alpha';
+              if (cbs.includes('beta')) return 'beta';
+              return getGlobalMode();
+          }
+
+          function readPortsFromCheckboxes(wrapId) {
+             const ports = [...document.querySelectorAll('#' + wrapId + ' input[type=checkbox]:checked')].map(c=>c.value);
+              return ports.length ? ports.join(',') : getGlobalPorts()[0];
+          }
+
           function commitAddUser() {
-              const name = document.getElementById('add-user-name').value;
+              const name = document.getElementById('add-user-name').value.trim();
               let tReq = document.getElementById('add-user-total-reqs').value;
               tReq = tReq? Math.floor(parseFloat(tReq) * 6000): null;
               let dReq = document.getElementById('add-user-daily-reqs').value;
               dReq = dReq? Math.floor(parseFloat(dReq) * 6000): null;
               let days = document.getElementById('add-user-days').value;
               const proxyIp = document.getElementById('add-user-proxy-ip').value || null;
-              const userMode = document.getElementById('add-user-mode').value || null;
-              const userPorts = document.getElementById('add-user-ports').value.trim() || null;
+              const userMode = readModeFromCheckboxes('add-mode-cb');
+              const userPorts = readPortsFromCheckboxes('add-user-ports-wrap');
               let maxConfigs = document.getElementById('add-user-max-configs').value;
               maxConfigs = maxConfigs ? parseInt(maxConfigs) : null;
               
               if(!name) {
-                  const enterNameMsg = lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name';
-                  alert(enterNameMsg);
+                  alert(lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name');
                   return;
               }
+
+              if(!window.nahanConfig) window.nahanConfig = {};
+              if(!window.nahanConfig.users) window.nahanConfig.users = [];
+
+              if(window.nahanConfig.users.some(u => u.name.trim().toLowerCase() === name.toLowerCase())) {
+                  alert(lang === 'fa' ? 'این نام قبلاً استفاده شده است' : 'This name is already taken');
+                  return;
+              }
+
               tReq = tReq ? parseInt(tReq) : null;
               dReq = dReq ? parseInt(dReq) : null;
               days = days ? parseInt(days) : null;
-              
-              if(!window.nahanConfig) window.nahanConfig = {};
-              if(!window.nahanConfig.users) window.nahanConfig.users = [];
               
               let newId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
                   .map((b,i) => (i===4||i===6||i===8||i===10?'-':'') + b.toString(16).padStart(2,'0')).join('');
@@ -5470,8 +5554,6 @@ function getDashboardUI(hasDB) {
               document.getElementById('add-user-daily-reqs').value = '';
               document.getElementById('add-user-days').value = '';
               document.getElementById('add-user-proxy-ip').value = '';
-              document.getElementById('add-user-mode').value = '';
-              document.getElementById('add-user-ports').value = '';
               document.getElementById('add-user-max-configs').value = '';
               
               renderUsersTable();
@@ -5488,10 +5570,11 @@ function getDashboardUI(hasDB) {
               document.getElementById('edit-user-total-reqs').value = u.limitTotalReq? (u.limitTotalReq / 6000).toFixed(2): '';
               document.getElementById('edit-user-daily-reqs').value = u.limitDailyReq? (u.limitDailyReq / 6000).toFixed(2): '';
               document.getElementById('edit-user-proxy-ip').value = u.proxyIp || '';
-              document.getElementById('edit-user-mode').value = u.userMode || '';
-              document.getElementById('edit-user-ports').value = u.userPorts || '';
               document.getElementById('edit-user-max-configs').value = u.maxConfigs || '';
               
+              buildPortCheckboxes('edit-user-ports-wrap', u.userPorts);
+              buildModeCheckboxes('edit-user-mode-wrap', u.userMode);
+
               let daysLeft = '';
               if(u.expiryMs) {
                   let diff = u.expiryMs - Date.now();
@@ -5504,21 +5587,20 @@ function getDashboardUI(hasDB) {
 
           function commitEditUser() {
               const uuid = document.getElementById('edit-user-id').value;
-              const name = document.getElementById('edit-user-name').value;
+              const name = document.getElementById('edit-user-name').value.trim();
               let tReq = document.getElementById('edit-user-total-reqs').value;
               tReq = tReq? Math.floor(parseFloat(tReq) * 6000): null;
               let dReq = document.getElementById('edit-user-daily-reqs').value;
               dReq = dReq? Math.floor(parseFloat(dReq) * 6000): null;
               let days = document.getElementById('edit-user-days').value;
               const proxyIp = document.getElementById('edit-user-proxy-ip').value || null;
-              const userMode = document.getElementById('edit-user-mode').value || null;
-              const userPorts = document.getElementById('edit-user-ports').value.trim() || null;
+              const userMode = readModeFromCheckboxes('edit-mode-cb');
+              const userPorts = readPortsFromCheckboxes('edit-user-ports-wrap');
               let maxConfigs = document.getElementById('edit-user-max-configs').value;
               maxConfigs = maxConfigs ? parseInt(maxConfigs) : null;
               
               if(!name) {
-                  const enterNameMsg = lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name';
-                  alert(enterNameMsg);
+                  alert(lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name');
                   return;
               }
               tReq = tReq ? parseInt(tReq) : null;
@@ -5526,6 +5608,12 @@ function getDashboardUI(hasDB) {
               days = days ? parseInt(days) : null;
               
               if(!window.nahanConfig || !window.nahanConfig.users) return;
+
+              if(window.nahanConfig.users.some(u => u.id !== uuid && u.name.trim().toLowerCase() === name.toLowerCase())) {
+                  alert(lang === 'fa' ? 'این نام قبلاً استفاده شده است' : 'This name is already taken');
+                  return;
+              }
+
               let u = window.nahanConfig.users.find(usr => usr.id === uuid);
               if(!u) return;
               
@@ -5782,7 +5870,39 @@ function getDashboardUI(hasDB) {
                   }
               }
           }
-          
+          //DateTime Function
+            function updatePersianDateTime() {
+    const now = new Date();
+
+    const formatter = new Intl.DateTimeFormat('fa-IR', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
+
+    const parts = formatter.formatToParts(now);
+
+    const map = {};
+    parts.forEach(p => {
+        map[p.type] = p.value;
+    });
+
+  
+      
+        const custom = \`\${map.day} \${map.month} \${map.year} \${map.hour}:\${map.minute}:\${map.second}\`;
+
+    document.getElementById("net-datetime").innerText = custom;
+    
+}
+
+                updatePersianDateTime();
+                setInterval(updatePersianDateTime, 1000);
+
+
+
           function dismissUpdate() {
               const b = document.getElementById('update-alert-banner');
               if (b) {
