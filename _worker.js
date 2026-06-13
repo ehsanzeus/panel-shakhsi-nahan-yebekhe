@@ -3298,7 +3298,7 @@ function getDashboardUI(hasDB) {
                                   </div>
                                   <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
                                       <input type="text" id="user-search-input" onkeyup="renderUsersTable()" placeholder="🔍 Find by Name or UUID..." data-i18n="user_search_placeholder" class="bg-slate-50 dark:bg-darkbg border border-slate-200 dark:border-darkborder px-4 py-2.5 rounded-xl text-xs outline-none font-sans text-slate-600 dark:text-slate-400 focus:border-primary">
-                                      <button onclick="document.getElementById('modal-add-user').classList.remove('hidden')" class="px-4 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-xs font-bold transition-colors shadow-sm" data-i18n="btn_add_user">+ Add New User</button>
+                                      <button onclick="document.getElementById('modal-add-user').classList.remove('hidden'); buildPortCheckboxes('add-user-ports-wrap', null); buildModeCheckboxes('add-user-mode-wrap', null);" class="px-4 py-2.5 bg-primary hover:bg-primary/90 text-white rounded-xl text-xs font-bold transition-colors shadow-sm" data-i18n="btn_add_user">+ Add New User</button>
                                   </div>
                               </div>
                               <div class="overflow-x-auto">
@@ -3345,17 +3345,15 @@ function getDashboardUI(hasDB) {
                                       <input type="text" id="add-user-proxy-ip" placeholder="e.g. 104.20.0.1, proxyip.com" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
                                   </div>
                                   <div>
-                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_Protocol">Protocol Mode (Leave empty to use global setting)</label>
-                                      <select id="add-user-mode" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm appearance-none">
-                                          <option value="">— Use Global Setting —</option>
-                                          <option value="alpha">Alpha Only (V-Core / VLESS)</option>
-                                          <option value="beta">Beta Only (T-Core / Trojan)</option>
-                                          <option value="both">Both (VLESS + Trojan)</option>
-                                      </select>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_Protocol">Protocol Mode</label>
+                                      <div id="add-user-mode-wrap" class="flex gap-3 mt-1">
+                                          <label class="flex items-center gap-1.5 text-sm cursor-pointer"><input type="checkbox" value="alpha" class="add-mode-cb accent-primary"> <span>Alpha (VLESS)</span></label>
+                                          <label class="flex items-center gap-1.5 text-sm cursor-pointer"><input type="checkbox" value="beta" class="add-mode-cb accent-primary"> <span>Beta (Trojan)</span></label>
+                                      </div>
                                   </div>
                                   <div>
-                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ports">Custom Ports (Optional - overrides global ports, comma separated e.g. 443,80)</label>
-                                      <input type="text" id="add-user-ports" placeholder="e.g. 443,80,2053" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ports">Ports</label>
+                                      <div id="add-user-ports-wrap" class="flex flex-wrap gap-2 mt-1"></div>
                                   </div>
                                   <div>
                                       <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_max_config">Max Configs (Optional - limit total generated configs, e.g. 4)</label>
@@ -3396,17 +3394,15 @@ function getDashboardUI(hasDB) {
                                       <input type="text" id="edit-user-proxy-ip" placeholder="e.g. 104.20.0.1, proxyip.com" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
                                   </div>
                                   <div>
-                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_Protocol">Protocol Mode (Leave empty to use global setting)</label>
-                                      <select id="edit-user-mode" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm appearance-none">
-                                          <option value="">— Use Global Setting —</option>
-                                          <option value="alpha">Alpha Only (V-Core / VLESS)</option>
-                                          <option value="beta">Beta Only (T-Core / Trojan)</option>
-                                          <option value="both">Both (VLESS + Trojan)</option>
-                                      </select>
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_Protocol">Protocol Mode</label>
+                                      <div id="edit-user-mode-wrap" class="flex gap-3 mt-1">
+                                          <label class="flex items-center gap-1.5 text-sm cursor-pointer"><input type="checkbox" value="alpha" class="edit-mode-cb accent-primary"> <span>Alpha (VLESS)</span></label>
+                                          <label class="flex items-center gap-1.5 text-sm cursor-pointer"><input type="checkbox" value="beta" class="edit-mode-cb accent-primary"> <span>Beta (Trojan)</span></label>
+                                      </div>
                                   </div>
                                   <div>
-                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ports">Custom Ports (Optional - overrides global ports, comma separated e.g. 443,80)</label>
-                                      <input type="text" id="edit-user-ports" placeholder="e.g. 443,80,2053" class="w-full px-4 py-2 rounded-xl border border-slate-200 dark:border-darkborder bg-slate-50 dark:bg-slate-800 focus:border-primary outline-none text-sm">
+                                      <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_ports">Ports</label>
+                                      <div id="edit-user-ports-wrap" class="flex flex-wrap gap-2 mt-1"></div>
                                   </div>
                                   <div>
                                       <label class="block text-xs font-bold text-slate-500 mb-1" data-i18n="lbl_u_max_config">Max Configs (Optional - limit total generated configs, e.g. 4)</label>
@@ -4337,30 +4333,82 @@ function getDashboardUI(hasDB) {
               }
           }
 
+          function getGlobalPorts() {
+              return (window.nahanConfig && window.nahanConfig.socketPorts)
+                  ? window.nahanConfig.socketPorts.split(',').map(s=>s.trim()).filter(Boolean)
+                  : ['443'];
+          }
+
+          function getGlobalMode() {
+              return (window.nahanConfig && window.nahanConfig.mode) ? window.nahanConfig.mode : 'alpha';
+          }
+
+          function buildPortCheckboxes(wrapId, selectedPorts) {
+              const wrap = document.getElementById(wrapId);
+              if (!wrap) return;
+              const globalPorts = getGlobalPorts();
+              const sel = selectedPorts ? selectedPorts.split(',').map(s=>s.trim()) : ['443'];
+              wrap.innerHTML = globalPorts.map(function(p) {
+                  return '<label class="flex items-center gap-1.5 text-sm cursor-pointer"><input type="checkbox" value="' + p + '" class="' + wrapId + '-port-cb accent-primary"' + (sel.includes(p) ? ' checked' : '') + '><span>' + p + '</span></label>';
+              }).join('');
+          }
+
+          function buildModeCheckboxes(wrapId, userMode) {
+              const globalMode = getGlobalMode();
+              const alphaAllowed = globalMode === 'alpha' || globalMode === 'both';
+              const betaAllowed = globalMode === 'beta' || globalMode === 'both';
+              const selAlpha = userMode === 'alpha' || userMode === 'both' || (!userMode && alphaAllowed);
+              const selBeta = userMode === 'beta' || userMode === 'both' || (!userMode && betaAllowed);
+              const wrap = document.getElementById(wrapId);
+              if (!wrap) return;
+              wrap.querySelectorAll('input[type=checkbox]').forEach(cb => {
+                  if (cb.value === 'alpha') { cb.disabled = !alphaAllowed; cb.checked = selAlpha && alphaAllowed; cb.closest			('label').style.opacity = alphaAllowed ? '1' : '0.35'; }
+                  if (cb.value === 'beta')  { cb.disabled = !betaAllowed;  cb.checked = selBeta && betaAllowed;  cb.closest			('label').style.opacity = betaAllowed  ? '1' : '0.35'; }
+              });
+          }
+
+          function readModeFromCheckboxes(cbClass) {
+             const cbs = [...document.querySelectorAll('.' + cbClass + ':checked')].map(c=>c.value);
+              if (cbs.includes('alpha') && cbs.includes('beta')) return 'both';
+              if (cbs.includes('alpha')) return 'alpha';
+              if (cbs.includes('beta')) return 'beta';
+              return getGlobalMode();
+          }
+
+          function readPortsFromCheckboxes(wrapId) {
+             const ports = [...document.querySelectorAll('#' + wrapId + ' input[type=checkbox]:checked')].map(c=>c.value);
+              return ports.length ? ports.join(',') : getGlobalPorts()[0];
+          }
+
           function commitAddUser() {
-              const name = document.getElementById('add-user-name').value;
+              const name = document.getElementById('add-user-name').value.trim();
               let tReq = document.getElementById('add-user-total-reqs').value;
               tReq = tReq? Math.floor(parseFloat(tReq) * 6000): null;
               let dReq = document.getElementById('add-user-daily-reqs').value;
               dReq = dReq? Math.floor(parseFloat(dReq) * 6000): null;
               let days = document.getElementById('add-user-days').value;
               const proxyIp = document.getElementById('add-user-proxy-ip').value || null;
-              const userMode = document.getElementById('add-user-mode').value || null;
-              const userPorts = document.getElementById('add-user-ports').value.trim() || null;
+              const userMode = readModeFromCheckboxes('add-mode-cb');
+              const userPorts = readPortsFromCheckboxes('add-user-ports-wrap');
               let maxConfigs = document.getElementById('add-user-max-configs').value;
               maxConfigs = maxConfigs ? parseInt(maxConfigs) : null;
               
               if(!name) {
-                  const enterNameMsg = lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name';
-                  alert(enterNameMsg);
+                  alert(lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name');
                   return;
               }
+
+              if(!window.nahanConfig) window.nahanConfig = {};
+              if(!window.nahanConfig.users) window.nahanConfig.users = [];
+
+              if(window.nahanConfig.users.some(u => u.name.trim().toLowerCase() === name.toLowerCase())) {
+                  alert(lang === 'fa' ? 'این نام قبلاً استفاده شده است' : 'This name is already taken');
+                  return;
+              }
+
               tReq = tReq ? parseInt(tReq) : null;
               dReq = dReq ? parseInt(dReq) : null;
               days = days ? parseInt(days) : null;
-              
-              if(!window.nahanConfig) window.nahanConfig = {};
-              if(!window.nahanConfig.users) window.nahanConfig.users = [];
               
               let newId = Array.from(crypto.getRandomValues(new Uint8Array(16)))
                   .map((b,i) => (i===4||i===6||i===8||i===10?'-':'') + b.toString(16).padStart(2,'0')).join('');
@@ -4385,8 +4433,6 @@ function getDashboardUI(hasDB) {
               document.getElementById('add-user-daily-reqs').value = '';
               document.getElementById('add-user-days').value = '';
               document.getElementById('add-user-proxy-ip').value = '';
-              document.getElementById('add-user-mode').value = '';
-              document.getElementById('add-user-ports').value = '';
               document.getElementById('add-user-max-configs').value = '';
               
               renderUsersTable();
@@ -4403,10 +4449,11 @@ function getDashboardUI(hasDB) {
               document.getElementById('edit-user-total-reqs').value = u.limitTotalReq? (u.limitTotalReq / 6000).toFixed(2): '';
               document.getElementById('edit-user-daily-reqs').value = u.limitDailyReq? (u.limitDailyReq / 6000).toFixed(2): '';
               document.getElementById('edit-user-proxy-ip').value = u.proxyIp || '';
-              document.getElementById('edit-user-mode').value = u.userMode || '';
-              document.getElementById('edit-user-ports').value = u.userPorts || '';
               document.getElementById('edit-user-max-configs').value = u.maxConfigs || '';
               
+              buildPortCheckboxes('edit-user-ports-wrap', u.userPorts);
+              buildModeCheckboxes('edit-user-mode-wrap', u.userMode);
+
               let daysLeft = '';
               if(u.expiryMs) {
                   let diff = u.expiryMs - Date.now();
@@ -4419,21 +4466,20 @@ function getDashboardUI(hasDB) {
 
           function commitEditUser() {
               const uuid = document.getElementById('edit-user-id').value;
-              const name = document.getElementById('edit-user-name').value;
+              const name = document.getElementById('edit-user-name').value.trim();
               let tReq = document.getElementById('edit-user-total-reqs').value;
               tReq = tReq? Math.floor(parseFloat(tReq) * 6000): null;
               let dReq = document.getElementById('edit-user-daily-reqs').value;
               dReq = dReq? Math.floor(parseFloat(dReq) * 6000): null;
               let days = document.getElementById('edit-user-days').value;
               const proxyIp = document.getElementById('edit-user-proxy-ip').value || null;
-              const userMode = document.getElementById('edit-user-mode').value || null;
-              const userPorts = document.getElementById('edit-user-ports').value.trim() || null;
+              const userMode = readModeFromCheckboxes('edit-mode-cb');
+              const userPorts = readPortsFromCheckboxes('edit-user-ports-wrap');
               let maxConfigs = document.getElementById('edit-user-max-configs').value;
               maxConfigs = maxConfigs ? parseInt(maxConfigs) : null;
               
               if(!name) {
-                  const enterNameMsg = lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name';
-                  alert(enterNameMsg);
+                  alert(lang === 'fa' ? 'لطفاً نام را وارد کنید' : 'Please enter a name');
                   return;
               }
               tReq = tReq ? parseInt(tReq) : null;
@@ -4441,6 +4487,12 @@ function getDashboardUI(hasDB) {
               days = days ? parseInt(days) : null;
               
               if(!window.nahanConfig || !window.nahanConfig.users) return;
+
+              if(window.nahanConfig.users.some(u => u.id !== uuid && u.name.trim().toLowerCase() === name.toLowerCase())) {
+                  alert(lang === 'fa' ? 'این نام قبلاً استفاده شده است' : 'This name is already taken');
+                  return;
+              }
+
               let u = window.nahanConfig.users.find(usr => usr.id === uuid);
               if(!u) return;
               
